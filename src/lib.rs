@@ -12,6 +12,12 @@ use crate::osc::OscValue;
 struct VstViseme {
     params: Arc<VstVisemeParams>,
     sender: osc::Sender,
+    /// 蓄積された二乗和（RMS計算用）
+    accumulated_sum_squares: f32,
+    /// 蓄積されたサンプル数
+    accumulated_sample_count: usize,
+    /// processが呼ばれた回数のカウンター
+    process_count: usize,
 }
 
 #[derive(Enum, PartialEq)]
@@ -37,11 +43,17 @@ struct VstVisemeParams {
     pub osc_addr: EnumParam<Addresses>,
 }
 
+/// 何回のprocessごとにOSCを送信するか
+const SEND_INTERVAL: usize = 16;
+
 impl Default for VstViseme {
     fn default() -> Self {
         Self {
             params: Arc::new(VstVisemeParams::default()),
             sender: osc::Sender::new(),
+            accumulated_sum_squares: 0.0,
+            accumulated_sample_count: 0,
+            process_count: 0,
         }
     }
 }
@@ -143,23 +155,30 @@ impl Plugin for VstViseme {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        let mut sum_squares = 0.0f32;
-        let mut sample_count = 0usize;
-
         for channel_samples in buffer.iter_samples() {
             let gain = self.params.gain.smoothed.next();
 
             for sample in channel_samples {
                 let s = *sample * gain;
-                sum_squares += s * s;
-                sample_count += 1;
+                self.accumulated_sum_squares += s * s;
+                self.accumulated_sample_count += 1;
             }
         }
 
-        if self.params.enabled.value() && sample_count > 0 {
-            let rms = (sum_squares / sample_count as f32).sqrt();
+        self.process_count += 1;
+
+        if self.params.enabled.value()
+            && self.process_count >= SEND_INTERVAL
+            && self.accumulated_sample_count > 0
+        {
+            let rms = (self.accumulated_sum_squares / self.accumulated_sample_count as f32).sqrt();
             let addr = self.params.osc_addr.value();
             self.sender.send(OscValue { addr, value: rms });
+
+            // リセット
+            self.accumulated_sum_squares = 0.0;
+            self.accumulated_sample_count = 0;
+            self.process_count = 0;
         }
 
         ProcessStatus::Normal
