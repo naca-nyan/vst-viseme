@@ -3,8 +3,15 @@ use std::net::UdpSocket;
 use std::sync::mpsc;
 use std::thread;
 
+use crate::Addresses;
+
+pub struct OscValue {
+    pub addr: Addresses,
+    pub value: f32,
+}
+
 pub struct Sender {
-    tx: Option<mpsc::SyncSender<f32>>,
+    tx: Option<mpsc::SyncSender<OscValue>>,
 }
 
 impl Sender {
@@ -13,7 +20,7 @@ impl Sender {
     }
 
     pub fn init(&mut self, port: i32) -> bool {
-        let (tx, rx) = mpsc::sync_channel::<f32>(16);
+        let (tx, rx) = mpsc::sync_channel::<OscValue>(16);
         self.tx = Some(tx);
 
         thread::spawn(move || {
@@ -24,15 +31,15 @@ impl Sender {
                     return;
                 }
             };
-            while let Ok(value) = rx.recv() {
-                send_f32(&sock, value);
+            while let Ok(osc_value) = rx.recv() {
+                send_f32(&sock, osc_value);
             }
         });
 
         true
     }
 
-    pub fn send(&self, value: f32) {
+    pub fn send(&self, value: OscValue) {
         if let Some(tx) = &self.tx {
             let _ = tx.try_send(value);
         }
@@ -47,11 +54,17 @@ fn initialize(port: i32) -> std::io::Result<UdpSocket> {
     Ok(sock)
 }
 
-fn send_f32(sock: &UdpSocket, v: f32) {
-    let packet = OscPacket::Message(OscMessage {
-        addr: "/avatar/parameters/Viseme1".into(),
-        args: vec![OscType::Float(v)],
-    });
+fn send_f32(sock: &UdpSocket, v: OscValue) {
+    let addr = match v.addr {
+        Addresses::Viseme1 => "/avatar/parameters/Viseme1",
+        Addresses::Viseme2 => "/avatar/parameters/Viseme2",
+        Addresses::Viseme3 => "/avatar/parameters/Viseme3",
+        Addresses::Viseme4 => "/avatar/parameters/Viseme4",
+        Addresses::Viseme5 => "/avatar/parameters/Viseme5",
+    }
+    .into();
+    let args = vec![OscType::Float(v.value)];
+    let packet = OscPacket::Message(OscMessage { addr, args });
     let buf = encoder::encode(&packet).unwrap();
     let _ = sock.send(&buf);
 }
@@ -60,5 +73,9 @@ fn send_f32(sock: &UdpSocket, v: f32) {
 fn test_send() {
     let mut sender = Sender::new();
     sender.init(9000);
-    sender.send(1.0);
+    let value = OscValue {
+        addr: Addresses::Viseme1,
+        value: 1.0,
+    };
+    sender.send(value);
 }

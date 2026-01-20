@@ -3,6 +3,8 @@ mod osc;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
+use crate::osc::OscValue;
+
 // This is a shortened version of the gain example with most comments removed, check out
 // https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
 // started
@@ -10,6 +12,15 @@ use std::sync::Arc;
 struct VstViseme {
     params: Arc<VstVisemeParams>,
     sender: osc::Sender,
+}
+
+#[derive(Enum, PartialEq)]
+pub enum Addresses {
+    Viseme1,
+    Viseme2,
+    Viseme3,
+    Viseme4,
+    Viseme5,
 }
 
 #[derive(Params)]
@@ -22,8 +33,8 @@ struct VstVisemeParams {
     pub gain: FloatParam,
     #[id = "enabled"]
     pub enabled: BoolParam,
-    #[id = "port"]
-    pub port: IntParam,
+    #[id = "address"]
+    pub osc_addr: EnumParam<Addresses>,
 }
 
 impl Default for VstViseme {
@@ -62,7 +73,7 @@ impl Default for VstVisemeParams {
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
             enabled: BoolParam::new("Enabled", true),
-            port: IntParam::new("Port", 9000, IntRange::Linear { min: 1, max: 25536 }),
+            osc_addr: EnumParam::new("Address", Addresses::Viseme1),
         }
     }
 }
@@ -117,8 +128,8 @@ impl Plugin for VstViseme {
         // Resize buffers and perform other potentially expensive initialization operations here.
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
-        let port = self.params.port.value();
-        self.sender.init(port)
+        const PORT: i32 = 9000;
+        self.sender.init(PORT)
     }
 
     fn reset(&mut self) {
@@ -147,7 +158,8 @@ impl Plugin for VstViseme {
 
         if self.params.enabled.value() && sample_count > 0 {
             let rms = (sum_squares / sample_count as f32).sqrt();
-            self.sender.send(rms);
+            let addr = self.params.osc_addr.value();
+            self.sender.send(OscValue { addr, value: rms });
         }
 
         ProcessStatus::Normal
