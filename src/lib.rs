@@ -1,3 +1,5 @@
+mod osc;
+
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
@@ -7,6 +9,7 @@ use std::sync::Arc;
 
 struct VstViseme {
     params: Arc<VstVisemeParams>,
+    sender: osc::Sender,
 }
 
 #[derive(Params)]
@@ -17,12 +20,17 @@ struct VstVisemeParams {
     /// gain parameter is stored as linear gain while the values are displayed in decibels.
     #[id = "gain"]
     pub gain: FloatParam,
+    #[id = "enabled"]
+    pub enabled: BoolParam,
+    #[id = "port"]
+    pub port: IntParam,
 }
 
 impl Default for VstViseme {
     fn default() -> Self {
         Self {
             params: Arc::new(VstVisemeParams::default()),
+            sender: osc::Sender::new(),
         }
     }
 }
@@ -53,6 +61,8 @@ impl Default for VstVisemeParams {
             // `.with_step_size(0.1)` function to get internal rounding.
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+            enabled: BoolParam::new("Enabled", true),
+            port: IntParam::new("Port", 9000, IntRange::Linear { min: 1, max: 25536 }),
         }
     }
 }
@@ -107,7 +117,8 @@ impl Plugin for VstViseme {
         // Resize buffers and perform other potentially expensive initialization operations here.
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
-        true
+        let port = self.params.port.value();
+        self.sender.init(port)
     }
 
     fn reset(&mut self) {
@@ -121,13 +132,22 @@ impl Plugin for VstViseme {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        let mut sum_squares = 0.0f32;
+        let mut sample_count = 0usize;
+
         for channel_samples in buffer.iter_samples() {
-            // Smoothing is optionally built into the parameters themselves
             let gain = self.params.gain.smoothed.next();
 
             for sample in channel_samples {
-                *sample *= gain;
+                let s = *sample * gain;
+                sum_squares += s * s;
+                sample_count += 1;
             }
+        }
+
+        if self.params.enabled.value() && sample_count > 0 {
+            let rms = (sum_squares / sample_count as f32).sqrt();
+            self.sender.send(rms);
         }
 
         ProcessStatus::Normal
