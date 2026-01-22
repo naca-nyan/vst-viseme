@@ -44,7 +44,7 @@ struct VstVisemeParams {
 }
 
 /// 何回のprocessごとにOSCを送信するか
-const SEND_INTERVAL: usize = 16;
+const SEND_INTERVAL: usize = 4;
 
 impl Default for VstViseme {
     fn default() -> Self {
