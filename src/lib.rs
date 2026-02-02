@@ -177,7 +177,7 @@ impl Plugin for VstViseme {
         {
             let rms = (self.state.acc_sum_squares / self.state.acc_sample_count as f32).sqrt();
             let addr = self.params.osc_addr.value();
-            self.sender.send(OscValue { addr, value: rms });
+            self.sender.send(OscValue::new(addr, rms));
 
             // リセット
             self.state = State::default()

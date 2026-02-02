@@ -7,8 +7,17 @@ use crate::Address;
 
 #[derive(Clone)]
 pub struct OscValue {
-    pub addr: Address,
-    pub value: f32,
+    addr: Address,
+    value: f32,
+}
+
+impl OscValue {
+    pub fn new(addr: Address, value: f32) -> Self {
+        Self {
+            addr: addr,
+            value: value.clamp(0.0f32, 1.0f32),
+        }
+    }
 }
 
 impl PartialEq for OscValue {
