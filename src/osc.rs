@@ -5,18 +5,30 @@ use std::thread;
 
 use crate::Address;
 
+#[derive(Clone)]
 pub struct OscValue {
     pub addr: Address,
     pub value: f32,
 }
 
+impl PartialEq for OscValue {
+    fn eq(&self, other: &Self) -> bool {
+        const THRESHOLD: f32 = 0.001;
+        self.addr == other.addr && (self.value - other.value).abs() < THRESHOLD
+    }
+}
+
 pub struct Sender {
     tx: Option<mpsc::SyncSender<OscValue>>,
+    previous_value: Option<OscValue>,
 }
 
 impl Sender {
     pub fn new() -> Self {
-        Self { tx: None }
+        Self {
+            tx: None,
+            previous_value: None,
+        }
     }
 
     pub fn init(&mut self, port: i32) -> bool {
@@ -39,10 +51,16 @@ impl Sender {
         true
     }
 
-    pub fn send(&self, value: OscValue) {
-        if let Some(tx) = &self.tx {
-            let _ = tx.try_send(value);
+    pub fn send(&mut self, value: OscValue) {
+        if let Some(prev) = &self.previous_value {
+            if *prev == value {
+                return;
+            }
         }
+        if let Some(tx) = &self.tx {
+            let _ = tx.try_send(value.clone());
+        }
+        self.previous_value = value.into();
     }
 }
 
