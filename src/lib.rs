@@ -1,32 +1,38 @@
+mod address;
 mod osc;
 
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
-use crate::osc::OscValue;
+use crate::{address::Address, osc::OscValue};
 
 // This is a shortened version of the gain example with most comments removed, check out
 // https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
 // started
 
-struct VstViseme {
-    params: Arc<VstVisemeParams>,
-    sender: osc::Sender,
+struct State {
     /// 蓄積された二乗和（RMS計算用）
-    accumulated_sum_squares: f32,
+    acc_sum_squares: f32,
     /// 蓄積されたサンプル数
-    accumulated_sample_count: usize,
+    acc_sample_count: usize,
     /// processが呼ばれた回数のカウンター
     process_count: usize,
 }
 
-#[derive(Enum, PartialEq)]
-pub enum Addresses {
-    Viseme1,
-    Viseme2,
-    Viseme3,
-    Viseme4,
-    Viseme5,
+impl Default for State {
+    fn default() -> Self {
+        State {
+            acc_sum_squares: 0.0,
+            acc_sample_count: 0,
+            process_count: 0,
+        }
+    }
+}
+
+struct VstViseme {
+    params: Arc<VstVisemeParams>,
+    sender: osc::Sender,
+    state: State,
 }
 
 #[derive(Params)]
@@ -40,7 +46,7 @@ struct VstVisemeParams {
     #[id = "enabled"]
     pub enabled: BoolParam,
     #[id = "address"]
-    pub osc_addr: EnumParam<Addresses>,
+    pub osc_addr: EnumParam<Address>,
 }
 
 /// 何回のprocessごとにOSCを送信するか
@@ -51,9 +57,7 @@ impl Default for VstViseme {
         Self {
             params: Arc::new(VstVisemeParams::default()),
             sender: osc::Sender::new(),
-            accumulated_sum_squares: 0.0,
-            accumulated_sample_count: 0,
-            process_count: 0,
+            state: State::default(),
         }
     }
 }
@@ -85,7 +89,7 @@ impl Default for VstVisemeParams {
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
             enabled: BoolParam::new("Enabled", true),
-            osc_addr: EnumParam::new("Address", Addresses::Viseme1),
+            osc_addr: EnumParam::new("Address", Address::Viseme1),
         }
     }
 }
@@ -160,25 +164,23 @@ impl Plugin for VstViseme {
 
             for sample in channel_samples {
                 let s = *sample * gain;
-                self.accumulated_sum_squares += s * s;
-                self.accumulated_sample_count += 1;
+                self.state.acc_sum_squares += s * s;
+                self.state.acc_sample_count += 1;
             }
         }
 
-        self.process_count += 1;
+        self.state.process_count += 1;
 
         if self.params.enabled.value()
-            && self.process_count >= SEND_INTERVAL
-            && self.accumulated_sample_count > 0
+            && self.state.process_count >= SEND_INTERVAL
+            && self.state.acc_sample_count > 0
         {
-            let rms = (self.accumulated_sum_squares / self.accumulated_sample_count as f32).sqrt();
+            let rms = (self.state.acc_sum_squares / self.state.acc_sample_count as f32).sqrt();
             let addr = self.params.osc_addr.value();
             self.sender.send(OscValue { addr, value: rms });
 
             // リセット
-            self.accumulated_sum_squares = 0.0;
-            self.accumulated_sample_count = 0;
-            self.process_count = 0;
+            self.state = State::default()
         }
 
         ProcessStatus::Normal

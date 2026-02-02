@@ -3,10 +3,10 @@ use std::net::UdpSocket;
 use std::sync::mpsc;
 use std::thread;
 
-use crate::Addresses;
+use crate::Address;
 
 pub struct OscValue {
-    pub addr: Addresses,
+    pub addr: Address,
     pub value: f32,
 }
 
@@ -55,14 +55,7 @@ fn initialize(port: i32) -> std::io::Result<UdpSocket> {
 }
 
 fn send_f32(sock: &UdpSocket, v: OscValue) {
-    let addr = match v.addr {
-        Addresses::Viseme1 => "/avatar/parameters/Viseme1",
-        Addresses::Viseme2 => "/avatar/parameters/Viseme2",
-        Addresses::Viseme3 => "/avatar/parameters/Viseme3",
-        Addresses::Viseme4 => "/avatar/parameters/Viseme4",
-        Addresses::Viseme5 => "/avatar/parameters/Viseme5",
-    }
-    .into();
+    let addr = v.addr.as_str().into();
     let args = vec![OscType::Float(v.value)];
     let packet = OscPacket::Message(OscMessage { addr, args });
     let buf = encoder::encode(&packet).unwrap();
@@ -74,7 +67,7 @@ fn test_send() {
     let mut sender = Sender::new();
     sender.init(9000);
     let value = OscValue {
-        addr: Addresses::Viseme1,
+        addr: Address::Viseme1,
         value: 1.0,
     };
     sender.send(value);
