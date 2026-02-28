@@ -12,11 +12,11 @@ pub enum Address {
 impl Address {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Address::Viseme1 => "/avatar/parameters/Viseme1",
-            Address::Viseme2 => "/avatar/parameters/Viseme2",
-            Address::Viseme3 => "/avatar/parameters/Viseme3",
-            Address::Viseme4 => "/avatar/parameters/Viseme4",
-            Address::Viseme5 => "/avatar/parameters/Viseme5",
+            Self::Viseme1 => "/avatar/parameters/Viseme1",
+            Self::Viseme2 => "/avatar/parameters/Viseme2",
+            Self::Viseme3 => "/avatar/parameters/Viseme3",
+            Self::Viseme4 => "/avatar/parameters/Viseme4",
+            Self::Viseme5 => "/avatar/parameters/Viseme5",
         }
     }
 }

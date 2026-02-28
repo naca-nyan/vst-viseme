@@ -1,47 +1,53 @@
 use rosc::{encoder, OscMessage, OscPacket, OscType};
+use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::sync::mpsc;
 use std::thread;
 
 use crate::Address;
 
-#[derive(Clone)]
-pub struct OscValue {
-    addr: Address,
-    value: f32,
+pub fn new_float_message(addr: Address, value: f32) -> OscMessage {
+    let addr = addr.as_str().into();
+    let clamped_value = value.clamp(0.0f32, 1.0f32);
+    let args = vec![OscType::Float(clamped_value)];
+    OscMessage { addr, args }
 }
 
-impl OscValue {
-    pub fn new(addr: Address, value: f32) -> Self {
-        Self {
-            addr: addr,
-            value: value.clamp(0.0f32, 1.0f32),
+fn is_nearly_eq_f32(a: f32, b: f32) -> bool {
+    const THRESHOLD: f32 = 0.001;
+    (a - b).abs() < THRESHOLD
+}
+
+fn is_nearly_eq(a: &OscMessage, b: &OscMessage) -> bool {
+    if a.addr != b.addr || a.args.len() != b.args.len() {
+        return false;
+    }
+    for (a, b) in a.args.iter().zip(b.args.iter()) {
+        match (a, b) {
+            (OscType::Int(a), OscType::Int(b)) if a != b => return false,
+            (OscType::Bool(a), OscType::Bool(b)) if a != b => return false,
+            (OscType::Float(a), OscType::Float(b)) if !is_nearly_eq_f32(*a, *b) => return false,
+            _ => (),
         }
     }
-}
-
-impl PartialEq for OscValue {
-    fn eq(&self, other: &Self) -> bool {
-        const THRESHOLD: f32 = 0.001;
-        self.addr == other.addr && (self.value - other.value).abs() < THRESHOLD
-    }
+    return true;
 }
 
 pub struct Sender {
-    tx: Option<mpsc::SyncSender<OscValue>>,
-    previous_value: Option<OscValue>,
+    tx: Option<mpsc::SyncSender<OscMessage>>,
+    state: HashMap<String, OscMessage>,
 }
 
 impl Sender {
     pub fn new() -> Self {
         Self {
             tx: None,
-            previous_value: None,
+            state: HashMap::new(),
         }
     }
 
     pub fn init(&mut self, port: i32) -> bool {
-        let (tx, rx) = mpsc::sync_channel::<OscValue>(16);
+        let (tx, rx) = mpsc::sync_channel::<_>(16);
         self.tx = Some(tx);
 
         thread::spawn(move || {
@@ -52,24 +58,26 @@ impl Sender {
                     return;
                 }
             };
-            while let Ok(osc_value) = rx.recv() {
-                send_f32(&sock, osc_value);
+            while let Ok(msg) = rx.recv() {
+                let packet = OscPacket::Message(msg);
+                let buf = encoder::encode(&packet).unwrap();
+                let _ = sock.send(&buf);
             }
         });
 
         true
     }
 
-    pub fn send(&mut self, value: OscValue) {
-        if let Some(prev) = &self.previous_value {
-            if *prev == value {
+    pub fn send(&mut self, value: OscMessage) {
+        if let Some(prev) = self.state.get(&value.addr) {
+            if is_nearly_eq(prev, &value) {
                 return;
             }
         }
         if let Some(tx) = &self.tx {
             let _ = tx.try_send(value.clone());
         }
-        self.previous_value = value.into();
+        self.state.insert(value.addr.clone(), value);
     }
 }
 
@@ -81,21 +89,10 @@ fn initialize(port: i32) -> std::io::Result<UdpSocket> {
     Ok(sock)
 }
 
-fn send_f32(sock: &UdpSocket, v: OscValue) {
-    let addr = v.addr.as_str().into();
-    let args = vec![OscType::Float(v.value)];
-    let packet = OscPacket::Message(OscMessage { addr, args });
-    let buf = encoder::encode(&packet).unwrap();
-    let _ = sock.send(&buf);
-}
-
 #[test]
 fn test_send() {
     let mut sender = Sender::new();
     sender.init(9000);
-    let value = OscValue {
-        addr: Address::Viseme1,
-        value: 1.0,
-    };
-    sender.send(value);
+    let msg = new_float_message(Address::Viseme1, 1.0);
+    sender.send(msg);
 }

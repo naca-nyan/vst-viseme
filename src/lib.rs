@@ -4,7 +4,7 @@ mod osc;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
-use crate::{address::Address, osc::OscValue};
+use crate::address::Address;
 
 // This is a shortened version of the gain example with most comments removed, check out
 // https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
@@ -177,7 +177,7 @@ impl Plugin for VstViseme {
         {
             let rms = (self.state.acc_sum_squares / self.state.acc_sample_count as f32).sqrt();
             let addr = self.params.osc_addr.value();
-            self.sender.send(OscValue::new(addr, rms));
+            self.sender.send(osc::new_float_message(addr, rms));
 
             // リセット
             self.state = State::default()
