@@ -117,7 +117,7 @@ impl Plugin for VstViseme {
         names: PortNames::const_default(),
     }];
 
-    const MIDI_INPUT: MidiConfig = MidiConfig::None;
+    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
@@ -157,7 +157,7 @@ impl Plugin for VstViseme {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        _context: &mut impl ProcessContext<Self>,
+        context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         for channel_samples in buffer.iter_samples() {
             let gain = self.params.gain.smoothed.next();
@@ -181,6 +181,18 @@ impl Plugin for VstViseme {
 
             // リセット
             self.state = State::default()
+        }
+
+        while let Some(event) = context.next_event() {
+            match event {
+                NoteEvent::NoteOn { note, .. } => {
+                    self.sender.send(osc::new_note_message(note, true))
+                }
+                NoteEvent::NoteOff { note, .. } => {
+                    self.sender.send(osc::new_note_message(note, false))
+                }
+                _ => (),
+            }
         }
 
         ProcessStatus::Normal

@@ -13,6 +13,12 @@ pub fn new_float_message(addr: Address, value: f32) -> OscMessage {
     OscMessage { addr, args }
 }
 
+pub fn new_note_message(note: u8, value: bool) -> OscMessage {
+    let addr = format!("/avatar/parameters/Note{}", note);
+    let args = vec![OscType::Bool(value)];
+    OscMessage { addr, args }
+}
+
 fn is_nearly_eq_f32(a: f32, b: f32) -> bool {
     const THRESHOLD: f32 = 0.001;
     (a - b).abs() < THRESHOLD
