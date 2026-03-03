@@ -16,10 +16,10 @@ crate-type = ["cdylib"]
 [dependencies]
 # Remove the `assert_process_allocs` feature to allow allocations on the audio
 # thread in debug builds.
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = [
+nih_plug = { git = "https://github.com/polartape/nih-plug.git", features = [
   "assert_process_allocs",
-] }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+], branch = "keyboard-fix" }
+nih_plug_egui = { git = "https://github.com/polartape/nih-plug.git", branch = "keyboard-fix" }
 rosc = "0.11.4"
 # Uncomment the below line to disable the on-by-default VST3 feature to remove
 # the GPL compatibility requirement
