@@ -1,10 +1,11 @@
 mod audio;
 mod osc;
+mod utils;
 
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{Grid, Vec2},
+    egui::{ComboBox, Grid, Vec2},
     resizable_window::ResizableWindow,
     widgets, EguiState,
 };
@@ -13,13 +14,18 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use audio::AudioState;
+use crate::audio::AudioState;
+use crate::utils::note_friendly_name;
 
 struct VstViseme {
     params: Arc<VstVisemeParams>,
     sender: osc::Sender,
     audio_state: AudioState,
 }
+
+type Note = u8;
+type ParamType = usize;
+const PARAM_TYPES: &[&str] = &["Bool", "Int", "Float"];
 
 #[derive(Params)]
 struct VstVisemeParams {
@@ -32,6 +38,8 @@ struct VstVisemeParams {
     pub gain: FloatParam,
     #[persist = "audio-address"]
     pub audio_addr: RwLock<String>,
+    #[persist = "midi-addresses"]
+    pub midi_addrs: RwLock<Vec<(Note, ParamType, String)>>,
 }
 
 impl Default for VstViseme {
@@ -63,6 +71,7 @@ impl Default for VstVisemeParams {
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
             audio_addr: RwLock::new("Viseme1".into()),
+            midi_addrs: RwLock::new(vec![(60, 0, "Item1".into())]),
         }
     }
 }
@@ -108,6 +117,7 @@ impl Plugin for VstViseme {
                 ResizableWindow::new("res-wind")
                     .min_size(Vec2::new(300.0, 180.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
+                        ui.heading("Audio");
                         Grid::new("audio grid").min_col_width(100.0).show(ui, |ui| {
                             ui.label("Gain");
                             ui.add(widgets::ParamSlider::for_param(&params.gain, setter));
@@ -116,6 +126,44 @@ impl Plugin for VstViseme {
                             ui.label("Address");
                             ui.text_edit_singleline(params.audio_addr.write().unwrap().deref_mut());
                             ui.end_row();
+                        });
+                        ui.add_space(10.0);
+                        ui.heading("Midi");
+                        let col_width = 70.0;
+                        let midi_grid = Grid::new("Midi grid").min_col_width(col_width);
+                        midi_grid.show(ui, |ui| {
+                            let mut addrs = params.midi_addrs.write().unwrap();
+                            let mut delete = None;
+                            for (i, (note, param_type, name)) in addrs.iter_mut().enumerate() {
+                                ComboBox::from_id_salt(format!("Note{i}"))
+                                    .width(col_width)
+                                    .selected_text(note_friendly_name(note))
+                                    .show_ui(ui, |ui| {
+                                        for n in (0..127u8).rev() {
+                                            ui.selectable_value(note, n, note_friendly_name(&n));
+                                        }
+                                    });
+                                ui.text_edit_singleline(name);
+                                ComboBox::from_id_salt(format!("ParamType{i}"))
+                                    .width(col_width)
+                                    .selected_text(PARAM_TYPES[*param_type])
+                                    .show_ui(ui, |ui| {
+                                        for t in 0..3 {
+                                            ui.selectable_value(param_type, t, PARAM_TYPES[t]);
+                                        }
+                                    });
+                                if ui.button("x").clicked() {
+                                    delete = Some(i);
+                                }
+                                ui.end_row();
+                            }
+                            if let Some(i) = delete {
+                                addrs.remove(i);
+                            }
+                            if addrs.len() < 128 && ui.button("Add").clicked() {
+                                let max = addrs.iter().map(|v| v.0).max();
+                                addrs.push((max.map(|v| v + 1).unwrap_or(60), 0, "Item1".into()));
+                            }
                         });
                     });
             },
@@ -154,13 +202,20 @@ impl Plugin for VstViseme {
         }
 
         // process midi
+        let midi_addrs = self.params.midi_addrs.read().unwrap();
         while let Some(event) = context.next_event() {
             match event {
-                NoteEvent::NoteOn { note, .. } => {
-                    self.sender.send(osc::new_note_message(note, true))
+                NoteEvent::NoteOn { note, velocity, .. } => {
+                    for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
+                        self.sender
+                            .send(osc::new_note_on_message(name, param_type, velocity))
+                    }
                 }
                 NoteEvent::NoteOff { note, .. } => {
-                    self.sender.send(osc::new_note_message(note, false))
+                    for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
+                        self.sender
+                            .send(osc::new_note_off_message(name, param_type))
+                    }
                 }
                 _ => (),
             }
