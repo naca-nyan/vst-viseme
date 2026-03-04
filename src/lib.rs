@@ -3,6 +3,12 @@ mod audio;
 mod osc;
 
 use nih_plug::prelude::*;
+use nih_plug_egui::{
+    create_egui_editor,
+    egui::{Grid, Vec2},
+    resizable_window::ResizableWindow,
+    widgets, EguiState,
+};
 use std::sync::Arc;
 
 use address::Address;
@@ -16,6 +22,9 @@ struct VstViseme {
 
 #[derive(Params)]
 struct VstVisemeParams {
+    #[persist = "editor-state"]
+    editor_state: Arc<EguiState>,
+
     #[id = "gain"]
     pub gain: FloatParam,
     #[id = "bypass"]
@@ -37,6 +46,7 @@ impl Default for VstViseme {
 impl Default for VstVisemeParams {
     fn default() -> Self {
         Self {
+            editor_state: EguiState::from_size(300, 180),
             gain: FloatParam::new(
                 "Gain",
                 util::db_to_gain(0.0),
@@ -84,6 +94,31 @@ impl Plugin for VstViseme {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
+    }
+
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        let params = self.params.clone();
+        let egui_state = params.editor_state.clone();
+        create_egui_editor(
+            self.params.editor_state.clone(),
+            (),
+            |_, _| {},
+            move |egui_ctx, setter, _state| {
+                ResizableWindow::new("res-wind")
+                    .min_size(Vec2::new(300.0, 180.0))
+                    .show(egui_ctx, egui_state.as_ref(), |ui| {
+                        Grid::new("audio grid").min_col_width(100.0).show(ui, |ui| {
+                            ui.label("Gain");
+                            ui.add(widgets::ParamSlider::for_param(&params.gain, setter));
+                            ui.end_row();
+
+                            ui.label("Address");
+                            ui.add(widgets::ParamSlider::for_param(&params.osc_addr, setter));
+                            ui.end_row();
+                        });
+                    });
+            },
+        )
     }
 
     fn initialize(
