@@ -1,4 +1,3 @@
-mod address;
 mod audio;
 mod osc;
 
@@ -9,9 +8,11 @@ use nih_plug_egui::{
     resizable_window::ResizableWindow,
     widgets, EguiState,
 };
-use std::sync::Arc;
+use std::{
+    ops::DerefMut,
+    sync::{Arc, RwLock},
+};
 
-use address::Address;
 use audio::AudioState;
 
 struct VstViseme {
@@ -25,12 +26,12 @@ struct VstVisemeParams {
     #[persist = "editor-state"]
     editor_state: Arc<EguiState>,
 
-    #[id = "gain"]
-    pub gain: FloatParam,
     #[id = "bypass"]
     pub bypass: BoolParam,
-    #[id = "address"]
-    pub osc_addr: EnumParam<Address>,
+    #[id = "gain"]
+    pub gain: FloatParam,
+    #[persist = "audio-address"]
+    pub audio_addr: RwLock<String>,
 }
 
 impl Default for VstViseme {
@@ -47,6 +48,7 @@ impl Default for VstVisemeParams {
     fn default() -> Self {
         Self {
             editor_state: EguiState::from_size(300, 180),
+            bypass: BoolParam::new("Bypass", false).make_bypass(),
             gain: FloatParam::new(
                 "Gain",
                 util::db_to_gain(0.0),
@@ -60,8 +62,7 @@ impl Default for VstVisemeParams {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
-            bypass: BoolParam::new("Bypass", false).make_bypass(),
-            osc_addr: EnumParam::new("Address", Address::Viseme1),
+            audio_addr: RwLock::new("Viseme1".into()),
         }
     }
 }
@@ -113,7 +114,7 @@ impl Plugin for VstViseme {
                             ui.end_row();
 
                             ui.label("Address");
-                            ui.add(widgets::ParamSlider::for_param(&params.osc_addr, setter));
+                            ui.text_edit_singleline(params.audio_addr.write().unwrap().deref_mut());
                             ui.end_row();
                         });
                     });
@@ -147,8 +148,8 @@ impl Plugin for VstViseme {
         let gain = self.params.gain.smoothed.next();
         self.audio_state.process(buffer, gain);
         if let Some(rms) = self.audio_state.try_get_rms() {
-            let addr = self.params.osc_addr.value();
-            self.sender.send(osc::new_float_message(addr, rms));
+            let addr = self.params.audio_addr.read().unwrap();
+            self.sender.send(osc::new_float_message(&addr, rms));
             self.audio_state.reset();
         }
 

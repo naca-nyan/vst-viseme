@@ -4,17 +4,17 @@ use std::net::UdpSocket;
 use std::sync::mpsc;
 use std::thread;
 
-use crate::Address;
+const PARAMETER_PREFIX: &str = "/avatar/parameters/";
 
-pub fn new_float_message(addr: Address, value: f32) -> OscMessage {
-    let addr = addr.as_str().into();
+pub fn new_float_message(name: &str, value: f32) -> OscMessage {
+    let addr = format!("{PARAMETER_PREFIX}{name}");
     let clamped_value = value.clamp(0.0f32, 1.0f32);
     let args = vec![OscType::Float(clamped_value)];
     OscMessage { addr, args }
 }
 
 pub fn new_note_message(note: u8, value: bool) -> OscMessage {
-    let addr = format!("/avatar/parameters/Note{}", note);
+    let addr = format!("{PARAMETER_PREFIX}Note{note}");
     let args = vec![OscType::Bool(value)];
     OscMessage { addr, args }
 }
@@ -93,12 +93,4 @@ fn initialize(port: i32) -> std::io::Result<UdpSocket> {
     let sock = UdpSocket::bind(localhost_any)?;
     sock.connect(target)?;
     Ok(sock)
-}
-
-#[test]
-fn test_send() {
-    let mut sender = Sender::new();
-    sender.init(9000);
-    let msg = new_float_message(Address::Viseme1, 1.0);
-    sender.send(msg);
 }
