@@ -18,8 +18,8 @@ struct VstViseme {
 struct VstVisemeParams {
     #[id = "gain"]
     pub gain: FloatParam,
-    #[id = "enabled"]
-    pub enabled: BoolParam,
+    #[id = "bypass"]
+    pub bypass: BoolParam,
     #[id = "address"]
     pub osc_addr: EnumParam<Address>,
 }
@@ -50,7 +50,7 @@ impl Default for VstVisemeParams {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
-            enabled: BoolParam::new("Enabled", true),
+            bypass: BoolParam::new("Bypass", false).make_bypass(),
             osc_addr: EnumParam::new("Address", Address::Viseme1),
         }
     }
@@ -104,7 +104,7 @@ impl Plugin for VstViseme {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        if !self.params.enabled.value() {
+        if self.params.bypass.value() {
             return ProcessStatus::Normal;
         }
 
