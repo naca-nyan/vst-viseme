@@ -1,46 +1,21 @@
 mod address;
+mod audio;
 mod osc;
 
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
-use crate::address::Address;
-
-// This is a shortened version of the gain example with most comments removed, check out
-// https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
-// started
-
-struct State {
-    /// 蓄積された二乗和（RMS計算用）
-    acc_sum_squares: f32,
-    /// 蓄積されたサンプル数
-    acc_sample_count: usize,
-    /// processが呼ばれた回数のカウンター
-    process_count: usize,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        State {
-            acc_sum_squares: 0.0,
-            acc_sample_count: 0,
-            process_count: 0,
-        }
-    }
-}
+use address::Address;
+use audio::AudioState;
 
 struct VstViseme {
     params: Arc<VstVisemeParams>,
     sender: osc::Sender,
-    state: State,
+    audio_state: AudioState,
 }
 
 #[derive(Params)]
 struct VstVisemeParams {
-    /// The parameter's ID is used to identify the parameter in the wrappred plugin API. As long as
-    /// these IDs remain constant, you can rename and reorder these fields as you wish. The
-    /// parameters are exposed to the host in the same order they were defined. In this case, this
-    /// gain parameter is stored as linear gain while the values are displayed in decibels.
     #[id = "gain"]
     pub gain: FloatParam,
     #[id = "enabled"]
@@ -49,15 +24,12 @@ struct VstVisemeParams {
     pub osc_addr: EnumParam<Address>,
 }
 
-/// 何回のprocessごとにOSCを送信するか
-const SEND_INTERVAL: usize = 4;
-
 impl Default for VstViseme {
     fn default() -> Self {
         Self {
             params: Arc::new(VstVisemeParams::default()),
             sender: osc::Sender::new(),
-            state: State::default(),
+            audio_state: AudioState::default(),
         }
     }
 }
@@ -65,27 +37,17 @@ impl Default for VstViseme {
 impl Default for VstVisemeParams {
     fn default() -> Self {
         Self {
-            // This gain is stored as linear gain. NIH-plug comes with useful conversion functions
-            // to treat these kinds of parameters as if we were dealing with decibels. Storing this
-            // as decibels is easier to work with, but requires a conversion for every sample.
             gain: FloatParam::new(
                 "Gain",
                 util::db_to_gain(0.0),
                 FloatRange::Skewed {
                     min: util::db_to_gain(-30.0),
                     max: util::db_to_gain(30.0),
-                    // This makes the range appear as if it was linear when displaying the values as
-                    // decibels
                     factor: FloatRange::gain_skew_factor(-30.0, 30.0),
                 },
             )
-            // Because the gain parameter is stored as linear gain instead of storing the value as
-            // decibels, we need logarithmic smoothing
             .with_smoother(SmoothingStyle::Logarithmic(50.0))
             .with_unit(" dB")
-            // There are many predefined formatters we can use here. If the gain was stored as
-            // decibels instead of as a linear gain value, we could have also used the
-            // `.with_step_size(0.1)` function to get internal rounding.
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
             enabled: BoolParam::new("Enabled", true),
@@ -102,8 +64,6 @@ impl Plugin for VstViseme {
 
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    // The first audio IO layout is used as the default. The other layouts may be selected either
-    // explicitly or automatically by the host or the user depending on the plugin API/backend.
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
         main_input_channels: NonZeroU32::new(2),
         main_output_channels: NonZeroU32::new(2),
@@ -111,9 +71,6 @@ impl Plugin for VstViseme {
         aux_input_ports: &[],
         aux_output_ports: &[],
 
-        // Individual ports and the layout as a whole can be named here. By default these names
-        // are generated as needed. This layout will be called 'Stereo', while a layout with
-        // only one input and output channel would be called 'Mono'.
         names: PortNames::const_default(),
     }];
 
@@ -122,13 +79,7 @@ impl Plugin for VstViseme {
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
-    // If the plugin can send or receive SysEx messages, it can define a type to wrap around those
-    // messages here. The type implements the `SysExMessage` trait, which allows conversion to and
-    // from plain byte buffers.
     type SysExMessage = ();
-    // More advanced plugins can use this to run expensive background tasks. See the field's
-    // documentation for more information. `()` means that the plugin does not have any background
-    // tasks.
     type BackgroundTask = ();
 
     fn params(&self) -> Arc<dyn Params> {
@@ -141,17 +92,11 @@ impl Plugin for VstViseme {
         _buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        // Resize buffers and perform other potentially expensive initialization operations here.
-        // The `reset()` function is always called right after this function. You can remove this
-        // function if you do not need it.
         const PORT: i32 = 9000;
         self.sender.init(PORT)
     }
 
-    fn reset(&mut self) {
-        // Reset buffers and envelopes here. This can be called from the audio thread and may not
-        // allocate. You can remove this function if you do not need it.
-    }
+    fn reset(&mut self) {}
 
     fn process(
         &mut self,
@@ -159,30 +104,20 @@ impl Plugin for VstViseme {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        for channel_samples in buffer.iter_samples() {
-            let gain = self.params.gain.smoothed.next();
-
-            for sample in channel_samples {
-                let s = *sample * gain;
-                self.state.acc_sum_squares += s * s;
-                self.state.acc_sample_count += 1;
-            }
+        if !self.params.enabled.value() {
+            return ProcessStatus::Normal;
         }
 
-        self.state.process_count += 1;
-
-        if self.params.enabled.value()
-            && self.state.process_count >= SEND_INTERVAL
-            && self.state.acc_sample_count > 0
-        {
-            let rms = (self.state.acc_sum_squares / self.state.acc_sample_count as f32).sqrt();
+        // process audio
+        let gain = self.params.gain.smoothed.next();
+        self.audio_state.process(buffer, gain);
+        if let Some(rms) = self.audio_state.try_get_rms() {
             let addr = self.params.osc_addr.value();
             self.sender.send(osc::new_float_message(addr, rms));
-
-            // リセット
-            self.state = State::default()
+            self.audio_state.reset();
         }
 
+        // process midi
         while let Some(event) = context.next_event() {
             match event {
                 NoteEvent::NoteOn { note, .. } => {
