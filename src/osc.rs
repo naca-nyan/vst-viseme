@@ -37,6 +37,17 @@ pub fn new_note_off_message(name: &str, param_type: &usize) -> OscMessage {
     OscMessage { addr, args }
 }
 
+pub fn new_cc_message(name: &str, param_type: &usize, value: f32) -> OscMessage {
+    let addr = format!("{PARAMETER_PREFIX}{name}");
+    let arg = match param_type {
+        1 => OscType::Int((value * 127.0).round() as i32),
+        2 => OscType::Float(value),
+        _ => unreachable!(),
+    };
+    let args = vec![arg];
+    OscMessage { addr, args }
+}
+
 fn is_nearly_eq_f32(a: f32, b: f32) -> bool {
     const THRESHOLD: f32 = 0.001;
     (a - b).abs() < THRESHOLD

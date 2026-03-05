@@ -40,6 +40,8 @@ struct VstVisemeParams {
     pub audio_addr: RwLock<String>,
     #[persist = "midi-addresses"]
     pub midi_addrs: RwLock<Vec<(Note, ParamType, String)>>,
+    #[persist = "cc-addresses"]
+    pub cc_addrs: RwLock<Vec<(Note, ParamType, String)>>,
 }
 
 impl Default for VstViseme {
@@ -55,7 +57,7 @@ impl Default for VstViseme {
 impl Default for VstVisemeParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(300, 180),
+            editor_state: EguiState::from_size(300, 280),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             gain: FloatParam::new(
                 "Gain",
@@ -72,6 +74,7 @@ impl Default for VstVisemeParams {
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
             audio_addr: RwLock::new("Viseme1".into()),
             midi_addrs: RwLock::new(vec![(60, 0, "Item1".into())]),
+            cc_addrs: RwLock::new(vec![(1, 2, "Float1".into())]),
         }
     }
 }
@@ -94,7 +97,7 @@ impl Plugin for VstViseme {
         names: PortNames::const_default(),
     }];
 
-    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
+    const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
@@ -115,7 +118,7 @@ impl Plugin for VstViseme {
             |_, _| {},
             move |egui_ctx, setter, _state| {
                 ResizableWindow::new("res-wind")
-                    .min_size(Vec2::new(300.0, 180.0))
+                    .min_size(Vec2::new(300.0, 280.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         ui.heading("Audio");
                         Grid::new("audio grid").min_col_width(100.0).show(ui, |ui| {
@@ -165,6 +168,45 @@ impl Plugin for VstViseme {
                                 addrs.push((max.map(|v| v + 1).unwrap_or(60), 0, "Item1".into()));
                             }
                         });
+
+                        ui.add_space(10.0);
+                        ui.heading("CC");
+                        let col_width = 70.0;
+                        let cc_grid = Grid::new("CC grid").min_col_width(col_width);
+                        cc_grid.show(ui, |ui| {
+                            let mut addrs = params.cc_addrs.write().unwrap();
+                            let mut delete = None;
+                            for (i, (cc, param_type, name)) in addrs.iter_mut().enumerate() {
+                                ComboBox::from_id_salt(format!("CC{i}"))
+                                    .width(col_width)
+                                    .selected_text(format!("CC {cc}"))
+                                    .show_ui(ui, |ui| {
+                                        for c in (0..127u8).rev() {
+                                            ui.selectable_value(cc, c, format!("CC {c}"));
+                                        }
+                                    });
+                                ui.text_edit_singleline(name);
+                                ComboBox::from_id_salt(format!("CCParamType{i}"))
+                                    .width(col_width)
+                                    .selected_text(PARAM_TYPES[*param_type])
+                                    .show_ui(ui, |ui| {
+                                        for t in 1..3 {
+                                            ui.selectable_value(param_type, t, PARAM_TYPES[t]);
+                                        }
+                                    });
+                                if ui.button("x").clicked() {
+                                    delete = Some(i);
+                                }
+                                ui.end_row();
+                            }
+                            if let Some(i) = delete {
+                                addrs.remove(i);
+                            }
+                            if addrs.len() < 128 && ui.button("Add").clicked() {
+                                let max = addrs.iter().map(|v| v.0).max();
+                                addrs.push((max.map(|v| v + 1).unwrap_or(60), 2, "Float1".into()));
+                            }
+                        });
                     });
             },
         )
@@ -203,6 +245,7 @@ impl Plugin for VstViseme {
 
         // process midi
         let midi_addrs = self.params.midi_addrs.read().unwrap();
+        let cc_addrs = self.params.cc_addrs.read().unwrap();
         while let Some(event) = context.next_event() {
             match event {
                 NoteEvent::NoteOn { note, velocity, .. } => {
@@ -215,6 +258,12 @@ impl Plugin for VstViseme {
                     for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
                         self.sender
                             .send(osc::new_note_off_message(name, param_type))
+                    }
+                }
+                NoteEvent::MidiCC { cc, value, .. } => {
+                    for (_, param_type, name) in cc_addrs.iter().filter(|v| v.0 == cc) {
+                        self.sender
+                            .send(osc::new_cc_message(name, param_type, value))
                     }
                 }
                 _ => (),
