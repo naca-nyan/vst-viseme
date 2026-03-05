@@ -1,11 +1,12 @@
 mod audio;
 mod osc;
 mod utils;
+mod widget;
 
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{ComboBox, Grid, Vec2},
+    egui::{Grid, Vec2},
     resizable_window::ResizableWindow,
     widgets, EguiState,
 };
@@ -16,16 +17,13 @@ use std::{
 
 use crate::audio::AudioState;
 use crate::utils::note_friendly_name;
+use crate::widget::ParamEntry;
 
 struct VstViseme {
     params: Arc<VstVisemeParams>,
     sender: osc::Sender,
     audio_state: AudioState,
 }
-
-type Note = u8;
-type ParamType = usize;
-const PARAM_TYPES: &[&str] = &["Bool", "Int", "Float"];
 
 #[derive(Params)]
 struct VstVisemeParams {
@@ -39,9 +37,9 @@ struct VstVisemeParams {
     #[persist = "audio-address"]
     pub audio_addr: RwLock<String>,
     #[persist = "midi-addresses"]
-    pub midi_addrs: RwLock<Vec<(Note, ParamType, String)>>,
+    pub midi_addrs: RwLock<Vec<ParamEntry>>,
     #[persist = "cc-addresses"]
-    pub cc_addrs: RwLock<Vec<(Note, ParamType, String)>>,
+    pub cc_addrs: RwLock<Vec<ParamEntry>>,
 }
 
 impl Default for VstViseme {
@@ -132,81 +130,20 @@ impl Plugin for VstViseme {
                         });
                         ui.add_space(10.0);
                         ui.heading("Midi");
-                        let col_width = 70.0;
-                        let midi_grid = Grid::new("Midi grid").min_col_width(col_width);
-                        midi_grid.show(ui, |ui| {
-                            let mut addrs = params.midi_addrs.write().unwrap();
-                            let mut delete = None;
-                            for (i, (note, param_type, name)) in addrs.iter_mut().enumerate() {
-                                ComboBox::from_id_salt(format!("Note{i}"))
-                                    .width(col_width)
-                                    .selected_text(note_friendly_name(note))
-                                    .show_ui(ui, |ui| {
-                                        for n in (0..127u8).rev() {
-                                            ui.selectable_value(note, n, note_friendly_name(&n));
-                                        }
-                                    });
-                                ui.text_edit_singleline(name);
-                                ComboBox::from_id_salt(format!("ParamType{i}"))
-                                    .width(col_width)
-                                    .selected_text(PARAM_TYPES[*param_type])
-                                    .show_ui(ui, |ui| {
-                                        for t in 0..3 {
-                                            ui.selectable_value(param_type, t, PARAM_TYPES[t]);
-                                        }
-                                    });
-                                if ui.button("x").clicked() {
-                                    delete = Some(i);
-                                }
-                                ui.end_row();
-                            }
-                            if let Some(i) = delete {
-                                addrs.remove(i);
-                            }
-                            if addrs.len() < 128 && ui.button("Add").clicked() {
-                                let max = addrs.iter().map(|v| v.0).max();
-                                addrs.push((max.map(|v| v + 1).unwrap_or(60), 0, "Item1".into()));
-                            }
-                        });
+                        let mut midi_addrs = params.midi_addrs.write().unwrap();
+                        let midi_param_map = widget::ParamMap::new("Midi", &mut midi_addrs)
+                            .trigger_formatter(note_friendly_name)
+                            .new_entry((60, 0, "Item1".into()));
+                        ui.add(midi_param_map);
 
                         ui.add_space(10.0);
                         ui.heading("CC");
-                        let col_width = 70.0;
-                        let cc_grid = Grid::new("CC grid").min_col_width(col_width);
-                        cc_grid.show(ui, |ui| {
-                            let mut addrs = params.cc_addrs.write().unwrap();
-                            let mut delete = None;
-                            for (i, (cc, param_type, name)) in addrs.iter_mut().enumerate() {
-                                ComboBox::from_id_salt(format!("CC{i}"))
-                                    .width(col_width)
-                                    .selected_text(format!("CC {cc}"))
-                                    .show_ui(ui, |ui| {
-                                        for c in (0..127u8).rev() {
-                                            ui.selectable_value(cc, c, format!("CC {c}"));
-                                        }
-                                    });
-                                ui.text_edit_singleline(name);
-                                ComboBox::from_id_salt(format!("CCParamType{i}"))
-                                    .width(col_width)
-                                    .selected_text(PARAM_TYPES[*param_type])
-                                    .show_ui(ui, |ui| {
-                                        for t in 1..3 {
-                                            ui.selectable_value(param_type, t, PARAM_TYPES[t]);
-                                        }
-                                    });
-                                if ui.button("x").clicked() {
-                                    delete = Some(i);
-                                }
-                                ui.end_row();
-                            }
-                            if let Some(i) = delete {
-                                addrs.remove(i);
-                            }
-                            if addrs.len() < 128 && ui.button("Add").clicked() {
-                                let max = addrs.iter().map(|v| v.0).max();
-                                addrs.push((max.map(|v| v + 1).unwrap_or(60), 2, "Float1".into()));
-                            }
-                        });
+                        let mut cc_addrs = params.cc_addrs.write().unwrap();
+                        let cc_param_map = widget::ParamMap::new("CC", &mut cc_addrs)
+                            .trigger_formatter(|cc| format!("CC {cc}"))
+                            .available_types((1..3).collect())
+                            .new_entry((1, 2, "Float1".into()));
+                        ui.add(cc_param_map);
                     });
             },
         )
