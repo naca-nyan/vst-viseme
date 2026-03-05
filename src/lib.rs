@@ -239,7 +239,9 @@ impl Plugin for VstViseme {
         self.audio_state.process(buffer, gain);
         if let Some(rms) = self.audio_state.try_get_rms() {
             let addr = self.params.audio_addr.read().unwrap();
-            self.sender.send(osc::new_float_message(&addr, rms));
+            if !addr.is_empty() {
+                self.sender.send(osc::new_float_message(&addr, rms));
+            }
             self.audio_state.reset();
         }
 
@@ -250,20 +252,26 @@ impl Plugin for VstViseme {
             match event {
                 NoteEvent::NoteOn { note, velocity, .. } => {
                     for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
-                        self.sender
-                            .send(osc::new_note_on_message(name, param_type, velocity))
+                        if !name.is_empty() {
+                            self.sender
+                                .send(osc::new_note_on_message(name, param_type, velocity));
+                        }
                     }
                 }
                 NoteEvent::NoteOff { note, .. } => {
                     for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
-                        self.sender
-                            .send(osc::new_note_off_message(name, param_type))
+                        if !name.is_empty() {
+                            self.sender
+                                .send(osc::new_note_off_message(name, param_type));
+                        }
                     }
                 }
                 NoteEvent::MidiCC { cc, value, .. } => {
                     for (_, param_type, name) in cc_addrs.iter().filter(|v| v.0 == cc) {
-                        self.sender
-                            .send(osc::new_cc_message(name, param_type, value))
+                        if !name.is_empty() {
+                            self.sender
+                                .send(osc::new_cc_message(name, param_type, value));
+                        }
                     }
                 }
                 _ => (),
