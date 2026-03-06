@@ -22,6 +22,7 @@ use crate::widget::ParamEntry;
 struct VstViseme {
     params: Arc<VstVisemeParams>,
     sender: osc::Sender,
+    receiver: osc::Receiver,
     audio_state: AudioState,
 }
 
@@ -47,6 +48,7 @@ impl Default for VstViseme {
         Self {
             params: Arc::new(VstVisemeParams::default()),
             sender: osc::Sender::new(),
+            receiver: osc::Receiver::new(),
             audio_state: AudioState::default(),
         }
     }
@@ -109,6 +111,7 @@ impl Plugin for VstViseme {
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
+        let receiver_state = self.receiver.state();
         let egui_state = params.editor_state.clone();
         create_egui_editor(
             self.params.editor_state.clone(),
@@ -144,6 +147,15 @@ impl Plugin for VstViseme {
                             .available_types((1..3).collect())
                             .new_entry((1, 2, "Float1".into()));
                         ui.add(cc_param_map);
+
+                        ui.add_space(10.0);
+                        Grid::new("state grid").show(ui, |ui| {
+                            for (k, v) in receiver_state.read().unwrap().iter() {
+                                ui.label(k);
+                                ui.label(v.to_string());
+                                ui.end_row();
+                            }
+                        });
                     });
             },
         )
@@ -155,8 +167,11 @@ impl Plugin for VstViseme {
         _buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        const PORT: i32 = 9000;
-        self.sender.init(PORT)
+        const SEND_PORT: i32 = 9000;
+        const RECEIVE_PORT: i32 = 9001;
+        self.sender.init(SEND_PORT);
+        self.receiver.init(RECEIVE_PORT);
+        true
     }
 
     fn reset(&mut self) {}
