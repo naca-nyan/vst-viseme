@@ -3,6 +3,7 @@ mod osc;
 mod utils;
 mod widget;
 
+use egui_autocomplete::AutoCompleteTextEdit;
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
@@ -11,13 +12,13 @@ use nih_plug_egui::{
     widgets, EguiState,
 };
 use std::{
-    ops::DerefMut,
+    collections::BTreeSet,
     sync::{Arc, RwLock},
 };
 
 use crate::audio::AudioState;
 use crate::utils::note_friendly_name;
-use crate::widget::ParamEntry;
+use crate::widget::{param_type_from_osc, ParamEntry};
 
 struct VstViseme {
     params: Arc<VstVisemeParams>,
@@ -121,6 +122,16 @@ impl Plugin for VstViseme {
                 ResizableWindow::new("res-wind")
                     .min_size(Vec2::new(300.0, 280.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
+                        let receiver_state = receiver_state.read().unwrap();
+                        let autocomplete = receiver_state
+                            .iter()
+                            .map(|(k, v)| {
+                                (
+                                    param_type_from_osc(v),
+                                    k.split("/").last().unwrap_or_default().to_string(),
+                                )
+                            })
+                            .collect::<Vec<_>>();
                         ui.heading("Audio");
                         Grid::new("audio grid").min_col_width(100.0).show(ui, |ui| {
                             ui.label("Gain");
@@ -128,13 +139,22 @@ impl Plugin for VstViseme {
                             ui.end_row();
 
                             ui.label("Address");
-                            ui.text_edit_singleline(params.audio_addr.write().unwrap().deref_mut());
+                            let search = &autocomplete
+                                .iter()
+                                .filter(|(t, _)| *t == 2)
+                                .map(|(_, t)| t.clone())
+                                .collect::<BTreeSet<_>>();
+                            let mut text = params.audio_addr.write().unwrap();
+                            ui.add(
+                                AutoCompleteTextEdit::new(&mut text, search).popup_on_focus(true),
+                            );
                             ui.end_row();
                         });
                         ui.add_space(10.0);
                         ui.heading("Midi");
                         let mut midi_addrs = params.midi_addrs.write().unwrap();
                         let midi_param_map = widget::ParamMap::new("Midi", &mut midi_addrs)
+                            .autocomplete(&autocomplete[..])
                             .trigger_formatter(note_friendly_name)
                             .new_entry((60, 0, "Item1".into()));
                         ui.add(midi_param_map);
@@ -143,6 +163,7 @@ impl Plugin for VstViseme {
                         ui.heading("CC");
                         let mut cc_addrs = params.cc_addrs.write().unwrap();
                         let cc_param_map = widget::ParamMap::new("CC", &mut cc_addrs)
+                            .autocomplete(&autocomplete[..])
                             .trigger_formatter(|cc| format!("CC {cc}"))
                             .available_types((1..3).collect())
                             .new_entry((1, 2, "Float1".into()));
@@ -150,7 +171,7 @@ impl Plugin for VstViseme {
 
                         ui.add_space(10.0);
                         Grid::new("state grid").show(ui, |ui| {
-                            for (k, v) in receiver_state.read().unwrap().iter() {
+                            for (k, v) in receiver_state.iter() {
                                 ui.label(k);
                                 ui.label(v.to_string());
                                 ui.end_row();

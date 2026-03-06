@@ -1,13 +1,27 @@
+use std::collections::BTreeSet;
+
+use egui_autocomplete::AutoCompleteTextEdit;
 use nih_plug_egui::egui::{ComboBox, Grid, Response, Ui, Widget};
+use rosc::OscType;
 
 type Trigger = u8;
 type ParamType = usize;
 pub type ParamEntry = (Trigger, ParamType, String);
 const PARAM_TYPES: &[&str] = &["Bool", "Int", "Float"];
 
+pub fn param_type_from_osc(t: &OscType) -> ParamType {
+    match t {
+        OscType::Bool(_) => 0,
+        OscType::Int(_) => 1,
+        OscType::Float(_) => 2,
+        _ => 0,
+    }
+}
+
 pub struct ParamMap<'a> {
     id_salt: &'a str,
     entries: &'a mut Vec<ParamEntry>,
+    autocomplete: &'a [(ParamType, String)],
     trigger_formatter: fn(&u8) -> String,
     available_types: Vec<usize>,
     new_entry: ParamEntry,
@@ -18,9 +32,16 @@ impl<'a> ParamMap<'a> {
         Self {
             id_salt,
             entries,
+            autocomplete: &[],
             trigger_formatter: |v| v.to_string(),
             available_types: (0..3).collect(),
             new_entry: (0, 0, "".into()),
+        }
+    }
+    pub fn autocomplete(self, autocomplete: &'a [(ParamType, String)]) -> Self {
+        Self {
+            autocomplete,
+            ..self
         }
     }
     pub fn trigger_formatter(self, trigger_formatter: fn(&u8) -> String) -> Self {
@@ -45,8 +66,14 @@ impl Widget for ParamMap<'_> {
         let id_salt = self.id_salt;
         let formatter = self.trigger_formatter;
         let available_types = &self.available_types;
-        let col_width = 70.0;
+        let col_width = 120.0;
         let midi_grid = Grid::new(format!("{id_salt} grid")).min_col_width(col_width);
+        let search = &self
+            .autocomplete
+            .iter()
+            .filter(|(t, _)| self.available_types.contains(t))
+            .map(|(_, t)| t.clone())
+            .collect::<BTreeSet<_>>();
         let inner_resp = midi_grid.show(ui, |ui| {
             let entries = self.entries;
             let mut delete = None;
@@ -59,7 +86,7 @@ impl Widget for ParamMap<'_> {
                             ui.selectable_value(trigger, n, formatter(&n));
                         }
                     });
-                ui.text_edit_singleline(name);
+                ui.add(AutoCompleteTextEdit::new(name, search).popup_on_focus(true));
                 ComboBox::from_id_salt(format!("{id_salt} param {i} combobox"))
                     .width(col_width)
                     .selected_text(PARAM_TYPES[*param_type])
