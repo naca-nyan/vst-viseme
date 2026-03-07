@@ -123,16 +123,18 @@ impl Plugin for VstViseme {
                     .min_size(Vec2::new(300.0, 280.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         let receiver_state = receiver.state();
-                        let receiver_state = receiver_state.read().unwrap();
-                        let autocomplete = receiver_state
-                            .iter()
-                            .map(|(k, v)| {
-                                (
-                                    param_type_from_osc(v),
-                                    k.split("/").last().unwrap_or_default().to_string(),
-                                )
-                            })
-                            .collect::<Vec<_>>();
+                        let autocomplete = {
+                            let state = receiver_state.read().unwrap();
+                            state
+                                .iter()
+                                .map(|(k, v)| {
+                                    (
+                                        param_type_from_osc(v),
+                                        k.split("/").last().unwrap_or_default().to_string(),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        };
                         ui.heading("Audio");
                         Grid::new("audio grid").min_col_width(100.0).show(ui, |ui| {
                             ui.label("Gain");
@@ -173,8 +175,9 @@ impl Plugin for VstViseme {
                         ui.add_space(10.0);
                         ui.heading("Monitor");
                         if receiver.is_running() {
+                            let state = receiver_state.read().unwrap();
                             Grid::new("state grid").show(ui, |ui| {
-                                for (k, v) in receiver_state.iter() {
+                                for (k, v) in state.iter() {
                                     ui.label(k);
                                     ui.label(v.to_string());
                                     ui.end_row();
