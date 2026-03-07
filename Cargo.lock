@@ -569,6 +569,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_autocomplete"
+version = "10.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5f4e00119517b25cb90bbaa5aa4cfb06258d8325ad59cc78e22b5c7d6cfeb4d"
+dependencies = [
+ "egui",
+ "fuzzy-matcher",
+]
+
+[[package]]
 name = "egui_glow"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -710,6 +720,15 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "fuzzy-matcher"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54614a3312934d066701a80f20f15fa3b56d67ac7722b39eea5b4c9dd1d66c94"
+dependencies = [
+ "thread_local",
 ]
 
 [[package]]
@@ -1859,6 +1878,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread_local"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "time"
 version = "0.3.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2045,6 +2073,7 @@ dependencies = [
 name = "vst_viseme"
 version = "0.1.0"
 dependencies = [
+ "egui_autocomplete",
  "nih_plug",
  "nih_plug_egui",
  "rosc",
