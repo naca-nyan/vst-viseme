@@ -1,20 +1,30 @@
-use rosc::{encoder, OscMessage, OscPacket, OscType};
+use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
 use std::collections::HashMap;
 use std::net::UdpSocket;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
+use std::time::Duration;
 
 const PARAMETER_PREFIX: &str = "/avatar/parameters/";
 
+fn name_to_address(name: &str) -> String {
+    format!("{PARAMETER_PREFIX}{name}")
+}
+
+fn try_get_name(s: &str) -> Option<&str> {
+    s.strip_prefix(PARAMETER_PREFIX)
+}
+
 pub fn new_float_message(name: &str, value: f32) -> OscMessage {
-    let addr = format!("{PARAMETER_PREFIX}{name}");
+    let addr = name_to_address(name);
     let clamped_value = value.clamp(0.0f32, 1.0f32);
     let args = vec![OscType::Float(clamped_value)];
     OscMessage { addr, args }
 }
 
 pub fn new_note_on_message(name: &str, param_type: &usize, value: f32) -> OscMessage {
-    let addr = format!("{PARAMETER_PREFIX}{name}");
+    let addr = name_to_address(name);
     let arg = match param_type {
         0 => OscType::Bool(true),
         1 => OscType::Int((value * 127.0).round() as i32),
@@ -26,7 +36,7 @@ pub fn new_note_on_message(name: &str, param_type: &usize, value: f32) -> OscMes
 }
 
 pub fn new_note_off_message(name: &str, param_type: &usize) -> OscMessage {
-    let addr = format!("{PARAMETER_PREFIX}{name}");
+    let addr = name_to_address(name);
     let arg = match param_type {
         0 => OscType::Bool(false),
         1 => OscType::Int(0),
@@ -38,7 +48,7 @@ pub fn new_note_off_message(name: &str, param_type: &usize) -> OscMessage {
 }
 
 pub fn new_cc_message(name: &str, param_type: &usize, value: f32) -> OscMessage {
-    let addr = format!("{PARAMETER_PREFIX}{name}");
+    let addr = name_to_address(name);
     let arg = match param_type {
         1 => OscType::Int((value * 127.0).round() as i32),
         2 => OscType::Float(value),
@@ -98,10 +108,10 @@ impl Sender {
         self.tx = Some(tx);
 
         thread::spawn(move || {
-            let sock = match initialize(port) {
+            let sock = match initialize_send_socket(port) {
                 Ok(s) => s,
                 Err(e) => {
-                    nih_plug::nih_error!("Failed to initialize OSC socket: {}", e);
+                    nih_plug::nih_error!("Failed to initialize send OSC socket: {}", e);
                     return;
                 }
             };
@@ -128,10 +138,88 @@ impl Sender {
     }
 }
 
-fn initialize(port: i32) -> std::io::Result<UdpSocket> {
+pub struct Receiver {
+    state: Arc<RwLock<HashMap<String, OscType>>>,
+    stop: Arc<AtomicBool>,
+    join_handle: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+impl Receiver {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(RwLock::new(HashMap::new())),
+            stop: AtomicBool::default().into(),
+            join_handle: Mutex::new(None),
+        }
+    }
+
+    pub fn state(&self) -> Arc<RwLock<HashMap<String, OscType>>> {
+        self.state.clone()
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.join_handle.lock().unwrap().is_some()
+    }
+
+    pub fn init(&self, receive_port: i32) {
+        if self.stop.load(Ordering::Acquire) {
+            return;
+        }
+        let state = self.state.clone();
+        let stop = self.stop.clone();
+        let join_handle = thread::spawn(move || {
+            let sock = match initialize_receive_socket(receive_port) {
+                Ok(s) => s,
+                Err(e) => {
+                    nih_plug::nih_error!("Failed to initialize receive OSC socket: {}", e);
+                    return;
+                }
+            };
+            let mut buf = [0; decoder::MTU];
+            while !stop.load(Ordering::Acquire) {
+                if let Ok((len, _)) = sock.recv_from(&mut buf) {
+                    if let Ok((_, packet)) = decoder::decode_udp(&buf[..len]) {
+                        if let OscPacket::Message(msg) = packet {
+                            if let Some(name) = try_get_name(&msg.addr) {
+                                if let Some(t) = msg.args.first() {
+                                    state.write().unwrap().insert(name.to_owned(), t.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        *self.join_handle.lock().unwrap() = Some(join_handle);
+    }
+
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        let join_handle = self.join_handle.lock().unwrap().take();
+        if let Some(join_handle) = join_handle {
+            join_handle.join().unwrap();
+        }
+        self.stop.store(false, Ordering::Release);
+    }
+}
+
+impl Drop for Receiver {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn initialize_send_socket(port: i32) -> std::io::Result<UdpSocket> {
     let localhost_any = "127.0.0.1:0";
     let target = format!("127.0.0.1:{}", port);
     let sock = UdpSocket::bind(localhost_any)?;
     sock.connect(target)?;
+    Ok(sock)
+}
+
+fn initialize_receive_socket(port: i32) -> std::io::Result<UdpSocket> {
+    let target = format!("127.0.0.1:{}", port);
+    let sock = UdpSocket::bind(target)?;
+    sock.set_read_timeout(Duration::from_millis(100).into())?;
     Ok(sock)
 }

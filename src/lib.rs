@@ -22,6 +22,7 @@ use crate::widget::ParamEntry;
 struct VstViseme {
     params: Arc<VstVisemeParams>,
     sender: osc::Sender,
+    receiver: Arc<osc::Receiver>,
     audio_state: AudioState,
 }
 
@@ -47,6 +48,7 @@ impl Default for VstViseme {
         Self {
             params: Arc::new(VstVisemeParams::default()),
             sender: osc::Sender::new(),
+            receiver: Arc::new(osc::Receiver::new()),
             audio_state: AudioState::default(),
         }
     }
@@ -109,6 +111,8 @@ impl Plugin for VstViseme {
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
+        let receiver = self.receiver.clone();
+        let receiver_state = receiver.state();
         let egui_state = params.editor_state.clone();
         create_egui_editor(
             self.params.editor_state.clone(),
@@ -144,6 +148,27 @@ impl Plugin for VstViseme {
                             .available_types((1..3).collect())
                             .new_entry((1, 2, "Float1".into()));
                         ui.add(cc_param_map);
+
+                        ui.add_space(10.0);
+                        ui.heading("Monitor");
+                        if receiver.is_running() {
+                            let state = receiver_state.read().unwrap();
+                            Grid::new("state grid").show(ui, |ui| {
+                                for (k, v) in state.iter() {
+                                    ui.label(k);
+                                    ui.label(v.to_string());
+                                    ui.end_row();
+                                }
+                            });
+                            if ui.button("Stop monitor").clicked() {
+                                receiver.stop()
+                            }
+                        } else {
+                            if ui.button("Start monitor").clicked() {
+                                const RECEIVE_PORT: i32 = 9001;
+                                receiver.init(RECEIVE_PORT);
+                            }
+                        }
                     });
             },
         )
