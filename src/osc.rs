@@ -50,6 +50,10 @@ pub fn new_cc_message(name: &str, param_type: &usize, value: f32) -> OscMessage 
     OscMessage { addr, args }
 }
 
+pub fn try_strip_prefix(msg: &str) -> &str {
+    msg.strip_prefix(PARAMETER_PREFIX).unwrap_or(msg)
+}
+
 fn is_nearly_eq_f32(a: f32, b: f32) -> bool {
     const THRESHOLD: f32 = 0.001;
     (a - b).abs() < THRESHOLD

@@ -3,7 +3,8 @@ mod osc;
 mod utils;
 mod widget;
 
-use egui_autocomplete::AutoCompleteTextEdit;
+use std::sync::{Arc, RwLock};
+
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
@@ -11,14 +12,12 @@ use nih_plug_egui::{
     resizable_window::ResizableWindow,
     widgets, EguiState,
 };
-use std::{
-    collections::BTreeSet,
-    sync::{Arc, RwLock},
-};
 
-use crate::audio::AudioState;
-use crate::utils::note_friendly_name;
-use crate::widget::{param_type_from_osc, ParamEntry};
+use crate::{
+    audio::AudioState,
+    utils::note_friendly_name,
+    widget::{autocomplete_entry, ParamEntry, ParamNameTextbox},
+};
 
 struct VstViseme {
     params: Arc<VstVisemeParams>,
@@ -113,6 +112,7 @@ impl Plugin for VstViseme {
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
         let receiver = self.receiver.clone();
+        let receiver_state = receiver.state();
         let egui_state = params.editor_state.clone();
         create_egui_editor(
             self.params.editor_state.clone(),
@@ -122,19 +122,12 @@ impl Plugin for VstViseme {
                 ResizableWindow::new("res-wind")
                     .min_size(Vec2::new(300.0, 280.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
-                        let receiver_state = receiver.state();
-                        let autocomplete = {
-                            let state = receiver_state.read().unwrap();
-                            state
-                                .iter()
-                                .map(|(k, v)| {
-                                    (
-                                        param_type_from_osc(v),
-                                        k.split("/").last().unwrap_or_default().to_string(),
-                                    )
-                                })
-                                .collect::<Vec<_>>()
-                        };
+                        let autocomplete = receiver_state
+                            .read()
+                            .unwrap()
+                            .iter()
+                            .map(|(k, v)| autocomplete_entry(k, v))
+                            .collect::<Vec<_>>();
                         ui.heading("Audio");
                         Grid::new("audio grid").min_col_width(100.0).show(ui, |ui| {
                             ui.label("Gain");
@@ -142,14 +135,10 @@ impl Plugin for VstViseme {
                             ui.end_row();
 
                             ui.label("Address");
-                            let search = &autocomplete
-                                .iter()
-                                .filter(|(t, _)| *t == 2)
-                                .map(|(_, t)| t.clone())
-                                .collect::<BTreeSet<_>>();
-                            let mut text = params.audio_addr.write().unwrap();
                             ui.add(
-                                AutoCompleteTextEdit::new(&mut text, search).popup_on_focus(true),
+                                ParamNameTextbox::new(&mut params.audio_addr.write().unwrap())
+                                    .autocomplete(&autocomplete)
+                                    .available_types(vec![2]),
                             );
                             ui.end_row();
                         });
