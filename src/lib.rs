@@ -23,7 +23,7 @@ use crate::widget::{param_type_from_osc, ParamEntry};
 struct VstViseme {
     params: Arc<VstVisemeParams>,
     sender: osc::Sender,
-    receiver: osc::Receiver,
+    receiver: Arc<osc::Receiver>,
     audio_state: AudioState,
 }
 
@@ -49,7 +49,7 @@ impl Default for VstViseme {
         Self {
             params: Arc::new(VstVisemeParams::default()),
             sender: osc::Sender::new(),
-            receiver: osc::Receiver::new(),
+            receiver: Arc::new(osc::Receiver::new()),
             audio_state: AudioState::default(),
         }
     }
@@ -112,7 +112,7 @@ impl Plugin for VstViseme {
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
-        let receiver_state = self.receiver.state();
+        let receiver = self.receiver.clone();
         let egui_state = params.editor_state.clone();
         create_egui_editor(
             self.params.editor_state.clone(),
@@ -122,6 +122,7 @@ impl Plugin for VstViseme {
                 ResizableWindow::new("res-wind")
                     .min_size(Vec2::new(300.0, 280.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
+                        let receiver_state = receiver.state();
                         let receiver_state = receiver_state.read().unwrap();
                         let autocomplete = receiver_state
                             .iter()
@@ -170,13 +171,24 @@ impl Plugin for VstViseme {
                         ui.add(cc_param_map);
 
                         ui.add_space(10.0);
-                        Grid::new("state grid").show(ui, |ui| {
-                            for (k, v) in receiver_state.iter() {
-                                ui.label(k);
-                                ui.label(v.to_string());
-                                ui.end_row();
+                        ui.heading("Monitor");
+                        if receiver.is_running() {
+                            Grid::new("state grid").show(ui, |ui| {
+                                for (k, v) in receiver_state.iter() {
+                                    ui.label(k);
+                                    ui.label(v.to_string());
+                                    ui.end_row();
+                                }
+                            });
+                            if ui.button("Stop monitor").clicked() {
+                                receiver.stop()
                             }
-                        });
+                        } else {
+                            if ui.button("Start monitor").clicked() {
+                                const RECEIVE_PORT: i32 = 9001;
+                                receiver.init(RECEIVE_PORT);
+                            }
+                        }
                     });
             },
         )
@@ -189,9 +201,7 @@ impl Plugin for VstViseme {
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         const SEND_PORT: i32 = 9000;
-        const RECEIVE_PORT: i32 = 9001;
         self.sender.init(SEND_PORT);
-        self.receiver.init(RECEIVE_PORT);
         true
     }
 

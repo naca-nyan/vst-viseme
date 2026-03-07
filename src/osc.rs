@@ -2,7 +2,7 @@ use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
 use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -131,7 +131,7 @@ impl Sender {
 pub struct Receiver {
     state: Arc<RwLock<HashMap<String, OscType>>>,
     stop: Arc<AtomicBool>,
-    join_handle: Option<thread::JoinHandle<()>>,
+    join_handle: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl Receiver {
@@ -139,7 +139,7 @@ impl Receiver {
         Self {
             state: Arc::new(RwLock::new(HashMap::new())),
             stop: AtomicBool::default().into(),
-            join_handle: None,
+            join_handle: Mutex::new(None),
         }
     }
 
@@ -147,7 +147,14 @@ impl Receiver {
         self.state.clone()
     }
 
-    pub fn init(&mut self, receive_port: i32) {
+    pub fn is_running(&self) -> bool {
+        self.join_handle.lock().unwrap().is_some()
+    }
+
+    pub fn init(&self, receive_port: i32) {
+        if self.stop.load(Ordering::Acquire) {
+            return;
+        }
         let state = self.state.clone();
         let stop = self.stop.clone();
         let join_handle = thread::spawn(move || {
@@ -171,16 +178,22 @@ impl Receiver {
                 }
             }
         });
-        self.join_handle = join_handle.into();
+        *self.join_handle.lock().unwrap() = Some(join_handle);
+    }
+
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        let join_handle = self.join_handle.lock().unwrap().take();
+        if let Some(join_handle) = join_handle {
+            join_handle.join().unwrap();
+        }
+        self.stop.store(false, Ordering::Release);
     }
 }
 
 impl Drop for Receiver {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(join_handle) = self.join_handle.take() {
-            join_handle.join().unwrap();
-        }
+        self.stop();
     }
 }
 
