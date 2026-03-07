@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{Grid, Vec2},
+    egui::{FontData, FontDefinitions, FontFamily, Grid, Vec2},
     resizable_window::ResizableWindow,
     widgets, EguiState,
 };
@@ -117,7 +117,23 @@ impl Plugin for VstViseme {
         create_egui_editor(
             self.params.editor_state.clone(),
             (),
-            |_, _| {},
+            |ctx, _| {
+                let font_candidates = [("Meiryo", "C:/Windows/Fonts/Meiryo.ttc")];
+                let mut font_definitions = FontDefinitions::default();
+                for (font_name, font_path) in font_candidates {
+                    if let Ok(font) = std::fs::read(font_path) {
+                        font_definitions
+                            .font_data
+                            .insert(font_name.to_owned(), Arc::new(FontData::from_owned(font)));
+                        font_definitions
+                            .families
+                            .get_mut(&FontFamily::Proportional)
+                            .unwrap()
+                            .insert(0, font_name.to_owned());
+                    }
+                }
+                ctx.set_fonts(font_definitions);
+            },
             move |egui_ctx, setter, _state| {
                 ResizableWindow::new("res-wind")
                     .min_size(Vec2::new(300.0, 280.0))
