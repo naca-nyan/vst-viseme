@@ -6,14 +6,17 @@ use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
+use crate::utils::{decode_unicode_escapes, encode_unicode_escapes};
+
 const PARAMETER_PREFIX: &str = "/avatar/parameters/";
 
 fn name_to_address(name: &str) -> String {
+    let name = encode_unicode_escapes(name);
     format!("{PARAMETER_PREFIX}{name}")
 }
 
-fn try_get_name(s: &str) -> Option<&str> {
-    s.strip_prefix(PARAMETER_PREFIX)
+fn try_get_name(s: &str) -> Option<String> {
+    s.strip_prefix(PARAMETER_PREFIX).map(decode_unicode_escapes)
 }
 
 pub fn new_float_message(name: &str, value: f32) -> OscMessage {
@@ -182,7 +185,7 @@ impl Receiver {
                         if let OscPacket::Message(msg) = packet {
                             if let Some(name) = try_get_name(&msg.addr) {
                                 if let Some(t) = msg.args.first() {
-                                    state.write().unwrap().insert(name.to_owned(), t.clone());
+                                    state.write().unwrap().insert(name, t.clone());
                                 }
                             }
                         }
