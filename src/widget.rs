@@ -1,10 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use egui_autocomplete::AutoCompleteTextEdit;
 use nih_plug_egui::egui::{ComboBox, Grid, Response, Ui, Widget};
 use rosc::OscType;
-
-use crate::osc;
 
 type Trigger = u8;
 type ParamType = usize;
@@ -20,39 +18,22 @@ fn param_type_from_osc(t: &OscType) -> ParamType {
     }
 }
 
-type AutocompleteEntry = (ParamType, String);
-
-pub fn autocomplete_entry(key: &str, t: &OscType) -> AutocompleteEntry {
-    (
-        param_type_from_osc(t),
-        osc::try_strip_prefix(key).to_owned(),
-    )
-}
-
 pub struct ParamNameTextbox<'a> {
     text_field: &'a mut String,
-    autocomplete: &'a [AutocompleteEntry],
-    available_types: Vec<ParamType>,
+    autocomplete: &'a HashMap<String, OscType>,
+    available_types: &'a [ParamType],
 }
 
 impl<'a> ParamNameTextbox<'a> {
-    pub fn new(text_field: &'a mut String) -> Self {
+    pub fn new(
+        text_field: &'a mut String,
+        autocomplete: &'a HashMap<String, OscType>,
+        available_types: &'a [ParamType],
+    ) -> Self {
         Self {
             text_field,
-            autocomplete: &[],
-            available_types: (0..PARAM_TYPES.len()).collect(),
-        }
-    }
-    pub fn autocomplete(self, autocomplete: &'a [AutocompleteEntry]) -> Self {
-        Self {
             autocomplete,
-            ..self
-        }
-    }
-    pub fn available_types(self, available_types: Vec<usize>) -> Self {
-        Self {
             available_types,
-            ..self
         }
     }
 }
@@ -63,8 +44,8 @@ impl Widget for ParamNameTextbox<'_> {
         let search = &self
             .autocomplete
             .iter()
-            .filter(|(t, _)| self.available_types.contains(t))
-            .map(|(_, t)| t.clone())
+            .filter(|(_, t)| self.available_types.contains(&param_type_from_osc(t)))
+            .map(|(s, _)| s)
             .collect::<BTreeSet<_>>();
         ui.add(AutoCompleteTextEdit::new(text_field, search).popup_on_focus(true))
     }
@@ -73,27 +54,25 @@ impl Widget for ParamNameTextbox<'_> {
 pub struct ParamMap<'a> {
     id_salt: &'a str,
     entries: &'a mut Vec<ParamEntry>,
-    autocomplete: &'a [AutocompleteEntry],
+    autocomplete: &'a HashMap<String, OscType>,
     trigger_formatter: fn(&u8) -> String,
     available_types: Vec<ParamType>,
     new_entry: ParamEntry,
 }
 
 impl<'a> ParamMap<'a> {
-    pub fn new(id_salt: &'a str, entries: &'a mut Vec<ParamEntry>) -> Self {
+    pub fn new(
+        id_salt: &'a str,
+        entries: &'a mut Vec<ParamEntry>,
+        autocomplete: &'a HashMap<String, OscType>,
+    ) -> Self {
         Self {
             id_salt,
             entries,
-            autocomplete: &[],
+            autocomplete,
             trigger_formatter: |v| v.to_string(),
             available_types: (0..PARAM_TYPES.len()).collect(),
             new_entry: (0, 0, "".into()),
-        }
-    }
-    pub fn autocomplete(self, autocomplete: &'a [AutocompleteEntry]) -> Self {
-        Self {
-            autocomplete,
-            ..self
         }
     }
     pub fn trigger_formatter(self, trigger_formatter: fn(&u8) -> String) -> Self {
@@ -132,11 +111,11 @@ impl Widget for ParamMap<'_> {
                             ui.selectable_value(trigger, n, formatter(&n));
                         }
                     });
-                ui.add(
-                    ParamNameTextbox::new(name)
-                        .autocomplete(self.autocomplete)
-                        .available_types(self.available_types.clone()),
-                );
+                ui.add(ParamNameTextbox::new(
+                    name,
+                    self.autocomplete,
+                    &self.available_types,
+                ));
                 ComboBox::from_id_salt(format!("{id_salt} param {i} combobox"))
                     .width(col_width)
                     .selected_text(PARAM_TYPES[*param_type])

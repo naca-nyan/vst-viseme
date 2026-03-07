@@ -6,17 +6,28 @@ use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
+use crate::utils::{decode_unicode_escapes, encode_unicode_escapes};
+
 const PARAMETER_PREFIX: &str = "/avatar/parameters/";
 
+fn name_to_address(name: &str) -> String {
+    let name = encode_unicode_escapes(name);
+    format!("{PARAMETER_PREFIX}{name}")
+}
+
+fn try_get_name(s: &str) -> Option<String> {
+    s.strip_prefix(PARAMETER_PREFIX).map(decode_unicode_escapes)
+}
+
 pub fn new_float_message(name: &str, value: f32) -> OscMessage {
-    let addr = format!("{PARAMETER_PREFIX}{name}");
+    let addr = name_to_address(name);
     let clamped_value = value.clamp(0.0f32, 1.0f32);
     let args = vec![OscType::Float(clamped_value)];
     OscMessage { addr, args }
 }
 
 pub fn new_note_on_message(name: &str, param_type: &usize, value: f32) -> OscMessage {
-    let addr = format!("{PARAMETER_PREFIX}{name}");
+    let addr = name_to_address(name);
     let arg = match param_type {
         0 => OscType::Bool(true),
         1 => OscType::Int((value * 127.0).round() as i32),
@@ -28,7 +39,7 @@ pub fn new_note_on_message(name: &str, param_type: &usize, value: f32) -> OscMes
 }
 
 pub fn new_note_off_message(name: &str, param_type: &usize) -> OscMessage {
-    let addr = format!("{PARAMETER_PREFIX}{name}");
+    let addr = name_to_address(name);
     let arg = match param_type {
         0 => OscType::Bool(false),
         1 => OscType::Int(0),
@@ -40,7 +51,7 @@ pub fn new_note_off_message(name: &str, param_type: &usize) -> OscMessage {
 }
 
 pub fn new_cc_message(name: &str, param_type: &usize, value: f32) -> OscMessage {
-    let addr = format!("{PARAMETER_PREFIX}{name}");
+    let addr = name_to_address(name);
     let arg = match param_type {
         1 => OscType::Int((value * 127.0).round() as i32),
         2 => OscType::Float(value),
@@ -48,10 +59,6 @@ pub fn new_cc_message(name: &str, param_type: &usize, value: f32) -> OscMessage 
     };
     let args = vec![arg];
     OscMessage { addr, args }
-}
-
-pub fn try_strip_prefix(msg: &str) -> &str {
-    msg.strip_prefix(PARAMETER_PREFIX).unwrap_or(msg)
 }
 
 fn is_nearly_eq_f32(a: f32, b: f32) -> bool {
@@ -174,8 +181,10 @@ impl Receiver {
                 if let Ok((len, _)) = sock.recv_from(&mut buf) {
                     if let Ok((_, packet)) = decoder::decode_udp(&buf[..len]) {
                         if let OscPacket::Message(msg) = packet {
-                            if let Some(t) = msg.args.first() {
-                                state.write().unwrap().insert(msg.addr, t.clone());
+                            if let Some(name) = try_get_name(&msg.addr) {
+                                if let Some(t) = msg.args.first() {
+                                    state.write().unwrap().insert(name, t.clone());
+                                }
                             }
                         }
                     }
