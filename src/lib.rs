@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{FontData, FontDefinitions, FontFamily, Grid, Vec2},
+    egui::{FontData, FontDefinitions, FontFamily, Frame, Grid, Vec2},
     resizable_window::ResizableWindow,
     widgets, EguiState,
 };
@@ -57,7 +57,7 @@ impl Default for VstViseme {
 impl Default for VstVisemeParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(300, 280),
+            editor_state: EguiState::from_size(350, 500),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             gain: FloatParam::new(
                 "Gain",
@@ -138,59 +138,66 @@ impl Plugin for VstViseme {
                 ResizableWindow::new("res-wind")
                     .min_size(Vec2::new(300.0, 280.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
-                        let autocomplete = receiver_state.read().unwrap().clone();
-                        ui.heading("Audio");
-                        Grid::new("audio grid").min_col_width(100.0).show(ui, |ui| {
-                            ui.label("Gain");
-                            ui.add(widgets::ParamSlider::for_param(&params.gain, setter));
-                            ui.end_row();
+                        Frame::new().inner_margin(6.0).show(ui, |ui| {
+                            let autocomplete = receiver_state.read().unwrap().clone();
+                            ui.heading("Audio");
+                            Grid::new("audio grid").num_columns(2).show(ui, |ui| {
+                                ui.label("Gain");
+                                ui.add(widgets::ParamSlider::for_param(&params.gain, setter));
+                                ui.end_row();
 
-                            ui.label("Address");
-                            {
-                                let mut address = params.audio_addr.write().unwrap();
-                                ui.add(ParamNameTextbox::new(&mut address, &autocomplete, &[2]));
-                            }
-                            ui.end_row();
-                        });
-                        ui.add_space(10.0);
-                        ui.heading("Midi");
-                        let mut midi_addrs = params.midi_addrs.write().unwrap();
-                        let midi_param_map =
-                            widget::ParamMap::new("Midi", &mut midi_addrs, &autocomplete)
-                                .trigger_formatter(note_friendly_name)
-                                .new_entry((60, 0, "Item1".into()));
-                        ui.add(midi_param_map);
-
-                        ui.add_space(10.0);
-                        ui.heading("CC");
-                        let mut cc_addrs = params.cc_addrs.write().unwrap();
-                        let cc_param_map =
-                            widget::ParamMap::new("CC", &mut cc_addrs, &autocomplete)
-                                .trigger_formatter(|cc| format!("CC {cc}"))
-                                .available_types((1..3).collect())
-                                .new_entry((1, 2, "Float1".into()));
-                        ui.add(cc_param_map);
-
-                        ui.add_space(10.0);
-                        ui.heading("Monitor");
-                        if receiver.is_running() {
-                            let state = receiver_state.read().unwrap();
-                            Grid::new("state grid").show(ui, |ui| {
-                                for (k, v) in state.iter() {
-                                    ui.label(k);
-                                    ui.label(v.to_string());
-                                    ui.end_row();
+                                ui.label("Address");
+                                {
+                                    let mut address = params.audio_addr.write().unwrap();
+                                    ui.add(ParamNameTextbox::new(
+                                        &mut address,
+                                        &autocomplete,
+                                        &[2],
+                                    ));
                                 }
+                                ui.end_row();
                             });
-                            if ui.button("Stop monitor").clicked() {
-                                receiver.stop()
+                            ui.add_space(10.0);
+                            ui.heading("Midi");
+                            let mut midi_addrs = params.midi_addrs.write().unwrap();
+                            let midi_param_map =
+                                widget::ParamMap::new("Midi", &mut midi_addrs, &autocomplete)
+                                    .reverse_trigger(true)
+                                    .trigger_formatter(note_friendly_name)
+                                    .new_entry((60, 0, "Item1".into()));
+                            ui.add(midi_param_map);
+
+                            ui.add_space(10.0);
+                            ui.heading("CC");
+                            let mut cc_addrs = params.cc_addrs.write().unwrap();
+                            let cc_param_map =
+                                widget::ParamMap::new("CC", &mut cc_addrs, &autocomplete)
+                                    .trigger_formatter(|cc| format!("CC {cc}"))
+                                    .available_types((1..3).collect())
+                                    .new_entry((1, 2, "Float1".into()));
+                            ui.add(cc_param_map);
+
+                            ui.add_space(10.0);
+                            ui.heading("Monitor");
+                            if receiver.is_running() {
+                                if ui.button("Stop monitor").clicked() {
+                                    receiver.stop()
+                                }
+                                let state = receiver_state.read().unwrap();
+                                Grid::new("state grid").num_columns(2).show(ui, |ui| {
+                                    for (k, v) in state.iter() {
+                                        ui.label(k);
+                                        ui.label(v.to_string());
+                                        ui.end_row();
+                                    }
+                                });
+                            } else {
+                                if ui.button("Start monitor").clicked() {
+                                    const RECEIVE_PORT: i32 = 9001;
+                                    receiver.init(RECEIVE_PORT);
+                                }
                             }
-                        } else {
-                            if ui.button("Start monitor").clicked() {
-                                const RECEIVE_PORT: i32 = 9001;
-                                receiver.init(RECEIVE_PORT);
-                            }
-                        }
+                        });
                     });
             },
         )
