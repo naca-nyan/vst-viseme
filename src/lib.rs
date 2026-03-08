@@ -19,7 +19,7 @@ use crate::{
     widget::{ParamEntry, ParamNameTextbox},
 };
 
-struct VstViseme {
+pub struct VstViseme {
     params: Arc<VstVisemeParams>,
     sender: osc::Sender,
     receiver: Arc<osc::Receiver>,
