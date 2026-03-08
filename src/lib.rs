@@ -16,7 +16,7 @@ use nih_plug_egui::{
 use crate::{
     audio::AudioState,
     utils::note_friendly_name,
-    widget::{ParamEntry, ParamNameTextbox},
+    widget::{ParamEntry, ParamNameTextEdit},
 };
 
 pub struct VstViseme {
@@ -149,7 +149,7 @@ impl Plugin for VstViseme {
                                 ui.label("Address");
                                 {
                                     let mut address = params.audio_addr.write().unwrap();
-                                    ui.add(ParamNameTextbox::new(
+                                    ui.add(ParamNameTextEdit::new(
                                         &mut address,
                                         &autocomplete,
                                         &[2],
@@ -173,7 +173,7 @@ impl Plugin for VstViseme {
                             let cc_param_map =
                                 widget::ParamMap::new("CC", &mut cc_addrs, &autocomplete)
                                     .trigger_formatter(|cc| format!("CC {cc}"))
-                                    .available_types((1..3).collect())
+                                    .selectable_types(vec![1, 2])
                                     .new_entry((1, 2, "Float1".into()));
                             ui.add(cc_param_map);
 

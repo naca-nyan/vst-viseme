@@ -18,33 +18,33 @@ fn param_type_from_osc(t: &OscType) -> ParamType {
     }
 }
 
-pub struct ParamNameTextbox<'a> {
+pub struct ParamNameTextEdit<'a> {
     text_field: &'a mut String,
     autocomplete: &'a HashMap<String, OscType>,
-    available_types: &'a [ParamType],
+    filter_types: &'a [ParamType],
 }
 
-impl<'a> ParamNameTextbox<'a> {
+impl<'a> ParamNameTextEdit<'a> {
     pub fn new(
         text_field: &'a mut String,
         autocomplete: &'a HashMap<String, OscType>,
-        available_types: &'a [ParamType],
+        filter_types: &'a [ParamType],
     ) -> Self {
         Self {
             text_field,
             autocomplete,
-            available_types,
+            filter_types,
         }
     }
 }
 
-impl Widget for ParamNameTextbox<'_> {
+impl Widget for ParamNameTextEdit<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let text_field = self.text_field;
         let search = &self
             .autocomplete
             .iter()
-            .filter(|(_, t)| self.available_types.contains(&param_type_from_osc(t)))
+            .filter(|(_, t)| self.filter_types.contains(&param_type_from_osc(t)))
             .map(|(s, _)| s)
             .collect::<BTreeSet<_>>();
         ui.add(
@@ -60,7 +60,7 @@ pub struct ParamMap<'a> {
     entries: &'a mut Vec<ParamEntry>,
     autocomplete: &'a HashMap<String, OscType>,
     trigger_formatter: fn(&u8) -> String,
-    available_types: Vec<ParamType>,
+    selectable_types: Vec<ParamType>,
     reverse_trigger: bool,
     new_entry: ParamEntry,
 }
@@ -76,7 +76,7 @@ impl<'a> ParamMap<'a> {
             entries,
             autocomplete,
             trigger_formatter: |v| v.to_string(),
-            available_types: (0..PARAM_TYPES.len()).collect(),
+            selectable_types: (0..PARAM_TYPES.len()).collect(),
             reverse_trigger: false,
             new_entry: (0, 0, "".into()),
         }
@@ -87,9 +87,9 @@ impl<'a> ParamMap<'a> {
             ..self
         }
     }
-    pub fn available_types(self, available_types: Vec<usize>) -> Self {
+    pub fn selectable_types(self, selectable_types: Vec<usize>) -> Self {
         Self {
-            available_types,
+            selectable_types,
             ..self
         }
     }
@@ -108,7 +108,6 @@ impl Widget for ParamMap<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let id_salt = self.id_salt;
         let formatter = self.trigger_formatter;
-        let available_types = &self.available_types;
         let entries = self.entries;
         let mut delete = None;
         let grid = Grid::new(format!("{id_salt} grid"))
@@ -139,14 +138,14 @@ impl Widget for ParamMap<'_> {
                             .width(56.0)
                             .selected_text(PARAM_TYPES[*param_type])
                             .show_ui(ui, |ui| {
-                                for &t in available_types {
+                                for &t in &self.selectable_types {
                                     ui.selectable_value(param_type, t, PARAM_TYPES[t]);
                                 }
                             });
-                        ui.add(ParamNameTextbox::new(
+                        ui.add(ParamNameTextEdit::new(
                             name,
                             self.autocomplete,
-                            &self.available_types,
+                            &[*param_type],
                         ));
                     });
                 });
