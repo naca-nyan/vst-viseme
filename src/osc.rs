@@ -1,10 +1,17 @@
+use std::{
+    collections::HashMap,
+    io,
+    net::UdpSocket,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, RwLock,
+    },
+    thread,
+    time::Duration,
+};
+
+use nih_plug::nih_error;
 use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
-use std::collections::HashMap;
-use std::net::UdpSocket;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex, RwLock};
-use std::thread;
-use std::time::Duration;
 
 use crate::utils::{decode_unicode_escapes, encode_unicode_escapes};
 
@@ -106,26 +113,26 @@ impl Sender {
         }
     }
 
-    pub fn init(&mut self, port: i32) -> bool {
+    pub fn init(&mut self, port: u16) -> io::Result<()> {
         let (tx, rx) = mpsc::sync_channel::<_>(16);
         self.tx = Some(tx);
 
+        let sock = UdpSocket::bind("127.0.0.1:0")?;
+        sock.connect(("127.0.0.1", port))?;
+        let sender_func = move |msg| {
+            let packet = OscPacket::Message(msg);
+            let buf = encoder::encode(&packet).ok()?;
+            sock.send(&buf)
+                .inspect_err(|e| nih_error!("failed to send: {e}"))
+                .ok()?;
+            Some(())
+        };
         thread::spawn(move || {
-            let sock = match initialize_send_socket(port) {
-                Ok(s) => s,
-                Err(e) => {
-                    nih_plug::nih_error!("Failed to initialize send OSC socket: {}", e);
-                    return;
-                }
-            };
-            while let Ok(msg) = rx.recv() {
-                let packet = OscPacket::Message(msg);
-                let buf = encoder::encode(&packet).unwrap();
-                let _ = sock.send(&buf);
+            for msg in rx {
+                sender_func(msg);
             }
         });
-
-        true
+        Ok(())
     }
 
     pub fn send(&mut self, value: OscMessage) {
@@ -144,7 +151,7 @@ impl Sender {
 pub struct Receiver {
     state: Arc<RwLock<HashMap<String, OscType>>>,
     stop: Arc<AtomicBool>,
-    join_handle: Mutex<Option<thread::JoinHandle<()>>>,
+    join_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Receiver {
@@ -152,7 +159,7 @@ impl Receiver {
         Self {
             state: Arc::new(RwLock::new(HashMap::new())),
             stop: AtomicBool::default().into(),
-            join_handle: Mutex::new(None),
+            join_handle: None,
         }
     }
 
@@ -161,46 +168,47 @@ impl Receiver {
     }
 
     pub fn is_running(&self) -> bool {
-        self.join_handle.lock().unwrap().is_some()
+        self.join_handle.is_some()
     }
 
-    pub fn init(&self, receive_port: i32) {
+    pub fn init(&mut self, port: u16) -> io::Result<()> {
         if self.stop.load(Ordering::Acquire) {
-            return;
+            return Ok(());
         }
+
+        let sock = UdpSocket::bind(("127.0.0.1", port))?;
+        sock.set_read_timeout(Some(Duration::from_millis(100)))?;
+
         let state = self.state.clone();
         let stop = self.stop.clone();
+        let mut buf = [0; decoder::MTU];
+        let mut receiver_func = move |sock: &UdpSocket| {
+            let (len, _) = sock.recv_from(&mut buf).ok()?;
+            let (_, packet) = decoder::decode_udp(&buf[..len]).ok()?;
+            if let OscPacket::Message(msg) = packet {
+                Some((try_get_name(&msg.addr)?, msg.args.first()?.clone()))
+            } else {
+                None
+            }
+        };
         let join_handle = thread::spawn(move || {
-            let sock = match initialize_receive_socket(receive_port) {
-                Ok(s) => s,
-                Err(e) => {
-                    nih_plug::nih_error!("Failed to initialize receive OSC socket: {}", e);
-                    return;
-                }
-            };
-            let mut buf = [0; decoder::MTU];
             while !stop.load(Ordering::Acquire) {
-                if let Ok((len, _)) = sock.recv_from(&mut buf) {
-                    if let Ok((_, packet)) = decoder::decode_udp(&buf[..len]) {
-                        if let OscPacket::Message(msg) = packet {
-                            if let Some(name) = try_get_name(&msg.addr) {
-                                if let Some(t) = msg.args.first() {
-                                    state.write().unwrap().insert(name, t.clone());
-                                }
-                            }
-                        }
-                    }
+                if let Some((name, t)) = receiver_func(&sock) {
+                    state.write().unwrap().insert(name, t);
                 }
             }
         });
-        *self.join_handle.lock().unwrap() = Some(join_handle);
+        self.join_handle = Some(join_handle);
+        Ok(())
     }
 
-    pub fn stop(&self) {
+    pub fn stop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        let join_handle = self.join_handle.lock().unwrap().take();
+        let join_handle = self.join_handle.take();
         if let Some(join_handle) = join_handle {
-            join_handle.join().unwrap();
+            join_handle
+                .join()
+                .unwrap_or_else(|_e| nih_error!("failed to join to receiver thread"));
         }
         self.stop.store(false, Ordering::Release);
     }
@@ -210,19 +218,4 @@ impl Drop for Receiver {
     fn drop(&mut self) {
         self.stop();
     }
-}
-
-fn initialize_send_socket(port: i32) -> std::io::Result<UdpSocket> {
-    let localhost_any = "127.0.0.1:0";
-    let target = format!("127.0.0.1:{}", port);
-    let sock = UdpSocket::bind(localhost_any)?;
-    sock.connect(target)?;
-    Ok(sock)
-}
-
-fn initialize_receive_socket(port: i32) -> std::io::Result<UdpSocket> {
-    let target = format!("127.0.0.1:{}", port);
-    let sock = UdpSocket::bind(target)?;
-    sock.set_read_timeout(Duration::from_millis(100).into())?;
-    Ok(sock)
 }

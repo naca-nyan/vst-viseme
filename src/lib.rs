@@ -22,7 +22,6 @@ use crate::{
 pub struct VstViseme {
     params: Arc<VstVisemeParams>,
     sender: osc::Sender,
-    receiver: Arc<osc::Receiver>,
     audio_state: AudioState,
 }
 
@@ -48,7 +47,6 @@ impl Default for VstViseme {
         Self {
             params: Arc::new(VstVisemeParams::default()),
             sender: osc::Sender::new(),
-            receiver: Arc::new(osc::Receiver::new()),
             audio_state: AudioState::default(),
         }
     }
@@ -111,12 +109,9 @@ impl Plugin for VstViseme {
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
-        let receiver = self.receiver.clone();
-        let receiver_state = receiver.state();
-        let egui_state = params.editor_state.clone();
         create_egui_editor(
             self.params.editor_state.clone(),
-            (),
+            osc::Receiver::new(),
             |ctx, _| {
                 let font_candidates = [("Meiryo", "C:/Windows/Fonts/Meiryo.ttc")];
                 let mut font_definitions = FontDefinitions::default();
@@ -134,7 +129,10 @@ impl Plugin for VstViseme {
                 }
                 ctx.set_fonts(font_definitions);
             },
-            move |egui_ctx, setter, _state| {
+            move |egui_ctx, setter, state| {
+                let receiver = state;
+                let receiver_state = receiver.state();
+                let egui_state = params.editor_state.clone();
                 ResizableWindow::new("res-wind")
                     .min_size(Vec2::new(300.0, 280.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
@@ -193,8 +191,10 @@ impl Plugin for VstViseme {
                                 });
                             } else {
                                 if ui.button("Start monitor").clicked() {
-                                    const RECEIVE_PORT: i32 = 9001;
-                                    receiver.init(RECEIVE_PORT);
+                                    const PORT: u16 = 9001;
+                                    receiver.init(PORT).unwrap_or_else(|e| {
+                                        nih_error!("Failed to init receiver: {}", e)
+                                    });
                                 }
                             }
                         });
@@ -209,8 +209,11 @@ impl Plugin for VstViseme {
         _buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        const PORT: i32 = 9000;
-        self.sender.init(PORT)
+        const PORT: u16 = 9000;
+        self.sender
+            .init(PORT)
+            .inspect_err(|e| nih_error!("Failed to init sender: {}", e))
+            .is_ok()
     }
 
     fn reset(&mut self) {}
