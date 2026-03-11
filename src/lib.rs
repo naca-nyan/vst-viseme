@@ -1,22 +1,15 @@
 mod audio;
+mod editor;
 mod osc;
 mod utils;
-mod widget;
 
 use std::sync::{Arc, RwLock};
 
 use nih_plug::prelude::*;
-use nih_plug_egui::{
-    create_egui_editor,
-    egui::{FontData, FontDefinitions, FontFamily, Frame, Grid, Vec2},
-    resizable_window::ResizableWindow,
-    widgets, EguiState,
-};
 
 use crate::{
     audio::AudioState,
-    utils::note_friendly_name,
-    widget::{ParamEntry, ParamNameTextEdit},
+    editor::{EditorState, ParamEntry},
 };
 
 pub struct VstViseme {
@@ -28,7 +21,7 @@ pub struct VstViseme {
 #[derive(Params)]
 struct VstVisemeParams {
     #[persist = "editor-state"]
-    editor_state: Arc<EguiState>,
+    editor_state: Arc<EditorState>,
 
     #[id = "bypass"]
     pub bypass: BoolParam,
@@ -55,7 +48,7 @@ impl Default for VstViseme {
 impl Default for VstVisemeParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(350, 500),
+            editor_state: editor::new_state(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             gain: FloatParam::new(
                 "Gain",
@@ -107,100 +100,9 @@ impl Plugin for VstViseme {
         self.params.clone()
     }
 
-    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+    fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
-        create_egui_editor(
-            self.params.editor_state.clone(),
-            osc::Receiver::new(),
-            |ctx, _| {
-                let font_candidates = [("Meiryo", "C:/Windows/Fonts/Meiryo.ttc")];
-                let mut font_definitions = FontDefinitions::default();
-                for (font_name, font_path) in font_candidates {
-                    if let Ok(font) = std::fs::read(font_path) {
-                        font_definitions
-                            .font_data
-                            .insert(font_name.to_owned(), Arc::new(FontData::from_owned(font)));
-                        font_definitions
-                            .families
-                            .get_mut(&FontFamily::Proportional)
-                            .unwrap()
-                            .insert(0, font_name.to_owned());
-                    }
-                }
-                ctx.set_fonts(font_definitions);
-            },
-            move |egui_ctx, setter, state| {
-                let receiver = state;
-                let receiver_state = receiver.state();
-                let egui_state = params.editor_state.clone();
-                ResizableWindow::new("res-wind")
-                    .min_size(Vec2::new(300.0, 280.0))
-                    .show(egui_ctx, egui_state.as_ref(), |ui| {
-                        Frame::new().inner_margin(6.0).show(ui, |ui| {
-                            let autocomplete = receiver_state.read().unwrap().clone();
-                            ui.heading("Audio");
-                            Grid::new("audio grid").num_columns(2).show(ui, |ui| {
-                                ui.label("Gain");
-                                ui.add(widgets::ParamSlider::for_param(&params.gain, setter));
-                                ui.end_row();
-
-                                ui.label("Address");
-                                {
-                                    let mut address = params.audio_addr.write().unwrap();
-                                    ui.add(ParamNameTextEdit::new(
-                                        &mut address,
-                                        &autocomplete,
-                                        &[2],
-                                    ));
-                                }
-                                ui.end_row();
-                            });
-                            ui.add_space(10.0);
-                            ui.heading("Midi");
-                            let mut midi_addrs = params.midi_addrs.write().unwrap();
-                            let midi_param_map =
-                                widget::ParamMap::new("Midi", &mut midi_addrs, &autocomplete)
-                                    .reverse_trigger(true)
-                                    .trigger_formatter(note_friendly_name)
-                                    .new_entry((60, 0, "Item1".into()));
-                            ui.add(midi_param_map);
-
-                            ui.add_space(10.0);
-                            ui.heading("CC");
-                            let mut cc_addrs = params.cc_addrs.write().unwrap();
-                            let cc_param_map =
-                                widget::ParamMap::new("CC", &mut cc_addrs, &autocomplete)
-                                    .trigger_formatter(|cc| format!("CC {cc}"))
-                                    .selectable_types(vec![1, 2])
-                                    .new_entry((1, 2, "Float1".into()));
-                            ui.add(cc_param_map);
-
-                            ui.add_space(10.0);
-                            ui.heading("Monitor");
-                            if receiver.is_running() {
-                                if ui.button("Stop monitor").clicked() {
-                                    receiver.stop()
-                                }
-                                let state = receiver_state.read().unwrap();
-                                Grid::new("state grid").num_columns(2).show(ui, |ui| {
-                                    for (k, v) in state.iter() {
-                                        ui.label(k);
-                                        ui.label(v.to_string());
-                                        ui.end_row();
-                                    }
-                                });
-                            } else {
-                                if ui.button("Start monitor").clicked() {
-                                    const PORT: u16 = 9001;
-                                    receiver.init(PORT).unwrap_or_else(|e| {
-                                        nih_error!("Failed to init receiver: {}", e)
-                                    });
-                                }
-                            }
-                        });
-                    });
-            },
-        )
+        editor::create_editor(params, async_executor)
     }
 
     fn initialize(

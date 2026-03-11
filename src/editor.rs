@@ -1,8 +1,15 @@
-use std::collections::{BTreeSet, HashMap};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
 use egui_autocomplete::AutoCompleteTextEdit;
-use nih_plug_egui::egui::{Align, ComboBox, Grid, Layout, Response, Ui, Widget};
+use nih_plug::prelude::*;
+use nih_plug_egui::egui::*;
+use nih_plug_egui::{create_egui_editor, resizable_window::ResizableWindow, widgets, EguiState};
 use rosc::OscType;
+
+use crate::{osc, utils::note_friendly_name, VstViseme, VstVisemeParams};
 
 type Trigger = u8;
 type ParamType = usize;
@@ -18,14 +25,14 @@ fn param_type_from_osc(t: &OscType) -> ParamType {
     }
 }
 
-pub struct ParamNameTextEdit<'a> {
+struct ParamNameTextEdit<'a> {
     text_field: &'a mut String,
     autocomplete: &'a HashMap<String, OscType>,
     filter_types: &'a [ParamType],
 }
 
 impl<'a> ParamNameTextEdit<'a> {
-    pub fn new(
+    fn new(
         text_field: &'a mut String,
         autocomplete: &'a HashMap<String, OscType>,
         filter_types: &'a [ParamType],
@@ -55,7 +62,7 @@ impl Widget for ParamNameTextEdit<'_> {
     }
 }
 
-pub struct ParamMap<'a> {
+struct ParamMap<'a> {
     id_salt: &'a str,
     entries: &'a mut Vec<ParamEntry>,
     autocomplete: &'a HashMap<String, OscType>,
@@ -66,7 +73,7 @@ pub struct ParamMap<'a> {
 }
 
 impl<'a> ParamMap<'a> {
-    pub fn new(
+    fn new(
         id_salt: &'a str,
         entries: &'a mut Vec<ParamEntry>,
         autocomplete: &'a HashMap<String, OscType>,
@@ -81,25 +88,25 @@ impl<'a> ParamMap<'a> {
             new_entry: (0, 0, "".into()),
         }
     }
-    pub fn trigger_formatter(self, trigger_formatter: fn(&u8) -> String) -> Self {
+    fn trigger_formatter(self, trigger_formatter: fn(&u8) -> String) -> Self {
         Self {
             trigger_formatter,
             ..self
         }
     }
-    pub fn selectable_types(self, selectable_types: Vec<usize>) -> Self {
+    fn selectable_types(self, selectable_types: Vec<usize>) -> Self {
         Self {
             selectable_types,
             ..self
         }
     }
-    pub fn reverse_trigger(self, reverse_trigger: bool) -> Self {
+    fn reverse_trigger(self, reverse_trigger: bool) -> Self {
         Self {
             reverse_trigger,
             ..self
         }
     }
-    pub fn new_entry(self, new_entry: ParamEntry) -> Self {
+    fn new_entry(self, new_entry: ParamEntry) -> Self {
         Self { new_entry, ..self }
     }
 }
@@ -164,5 +171,116 @@ impl Widget for ParamMap<'_> {
             entries.push(new_entry);
         }
         response
+    }
+}
+
+pub type EditorState = EguiState;
+pub fn new_state() -> Arc<EditorState> {
+    EguiState::from_size(350, 500)
+}
+
+struct UserState {
+    receiver: osc::Receiver,
+}
+
+pub fn create_editor(
+    params: Arc<VstVisemeParams>,
+    _async_executor: AsyncExecutor<VstViseme>,
+) -> Option<Box<dyn Editor>> {
+    let receiver = osc::Receiver::new();
+    let egui_state = params.editor_state.clone();
+    create_egui_editor(
+        egui_state,
+        UserState { receiver },
+        build,
+        move |ctx, setter, state| {
+            ResizableWindow::new("res-wind")
+                .min_size(Vec2::new(300.0, 280.0))
+                .show(ctx, params.editor_state.clone().as_ref(), |ui| {
+                    Frame::new()
+                        .inner_margin(6.0)
+                        .show(ui, |ui| contents(ui, params.clone(), setter, state));
+                });
+        },
+    )
+}
+
+fn build(ctx: &Context, _: &mut UserState) {
+    let font_candidates = [("Meiryo", "C:/Windows/Fonts/Meiryo.ttc")];
+    let mut font_definitions = FontDefinitions::default();
+    for (font_name, font_path) in font_candidates {
+        if let Ok(font) = std::fs::read(font_path) {
+            font_definitions
+                .font_data
+                .insert(font_name.to_owned(), Arc::new(FontData::from_owned(font)));
+            font_definitions
+                .families
+                .get_mut(&FontFamily::Proportional)
+                .unwrap()
+                .insert(0, font_name.to_owned());
+        }
+    }
+    ctx.set_fonts(font_definitions);
+}
+
+fn contents(
+    ui: &mut Ui,
+    params: Arc<VstVisemeParams>,
+    setter: &ParamSetter<'_>,
+    state: &mut UserState,
+) {
+    let receiver = &mut state.receiver;
+    let receiver_state = receiver.state().read().unwrap().clone();
+    ui.heading("Audio");
+    Grid::new("audio grid").num_columns(2).show(ui, |ui| {
+        ui.label("Gain");
+        ui.add(widgets::ParamSlider::for_param(&params.gain, setter));
+        ui.end_row();
+
+        ui.label("Address");
+        {
+            let mut address = params.audio_addr.write().unwrap();
+            ui.add(ParamNameTextEdit::new(&mut address, &receiver_state, &[2]));
+        }
+        ui.end_row();
+    });
+    ui.add_space(10.0);
+    ui.heading("Midi");
+    let mut midi_addrs = params.midi_addrs.write().unwrap();
+    let midi_param_map = ParamMap::new("Midi", &mut midi_addrs, &receiver_state)
+        .reverse_trigger(true)
+        .trigger_formatter(note_friendly_name)
+        .new_entry((60, 0, "Item1".into()));
+    ui.add(midi_param_map);
+
+    ui.add_space(10.0);
+    ui.heading("CC");
+    let mut cc_addrs = params.cc_addrs.write().unwrap();
+    let cc_param_map = ParamMap::new("CC", &mut cc_addrs, &receiver_state)
+        .trigger_formatter(|cc| format!("CC {cc}"))
+        .selectable_types(vec![1, 2])
+        .new_entry((1, 2, "Float1".into()));
+    ui.add(cc_param_map);
+
+    ui.add_space(10.0);
+    ui.heading("Monitor");
+    if receiver.is_running() {
+        if ui.button("Stop monitor").clicked() {
+            receiver.stop()
+        }
+        Grid::new("state grid").num_columns(2).show(ui, |ui| {
+            for (k, v) in receiver_state.iter() {
+                ui.label(k);
+                ui.label(v.to_string());
+                ui.end_row();
+            }
+        });
+    } else {
+        if ui.button("Start monitor").clicked() {
+            const PORT: u16 = 9001;
+            receiver
+                .init(PORT)
+                .unwrap_or_else(|e| nih_error!("Failed to init receiver: {}", e));
+        }
     }
 }
