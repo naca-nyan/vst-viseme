@@ -28,19 +28,19 @@ fn param_type_from_osc(t: &OscType) -> ParamType {
 struct ParamNameTextEdit<'a> {
     text_field: &'a mut String,
     autocomplete: &'a HashMap<String, OscType>,
-    filter_types: &'a [ParamType],
+    filter_type: &'a ParamType,
 }
 
 impl<'a> ParamNameTextEdit<'a> {
     fn new(
         text_field: &'a mut String,
         autocomplete: &'a HashMap<String, OscType>,
-        filter_types: &'a [ParamType],
+        filter_type: &'a ParamType,
     ) -> Self {
         Self {
             text_field,
             autocomplete,
-            filter_types,
+            filter_type,
         }
     }
 }
@@ -51,8 +51,7 @@ impl Widget for ParamNameTextEdit<'_> {
         let search = &self
             .autocomplete
             .iter()
-            .filter(|(_, t)| self.filter_types.contains(&param_type_from_osc(t)))
-            .map(|(s, _)| s)
+            .filter_map(|(s, t)| self.filter_type.eq(&param_type_from_osc(t)).then_some(s))
             .collect::<BTreeSet<_>>();
         ui.add(
             AutoCompleteTextEdit::new(text_field, search)
@@ -149,11 +148,7 @@ impl Widget for ParamMap<'_> {
                                     ui.selectable_value(param_type, t, PARAM_TYPES[t]);
                                 }
                             });
-                        ui.add(ParamNameTextEdit::new(
-                            name,
-                            self.autocomplete,
-                            &[*param_type],
-                        ));
+                        ui.add(ParamNameTextEdit::new(name, self.autocomplete, param_type));
                     });
                 });
                 ui.end_row();
@@ -240,7 +235,7 @@ fn contents(
         ui.label("Address");
         {
             let mut address = params.audio_addr.write().unwrap();
-            ui.add(ParamNameTextEdit::new(&mut address, &receiver_state, &[2]));
+            ui.add(ParamNameTextEdit::new(&mut address, &receiver_state, &2));
         }
         ui.end_row();
     });
