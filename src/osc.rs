@@ -97,7 +97,7 @@ fn is_nearly_eq(a: &OscMessage, b: &OscMessage) -> bool {
             _ => return false,
         }
     }
-    return true;
+    true
 }
 
 pub struct Sender {

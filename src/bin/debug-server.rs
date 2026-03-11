@@ -8,11 +8,8 @@ fn receive_loop() {
         let mut buf = [0; decoder::MTU];
         let (len, _addr) = sock.recv_from(&mut buf).expect("Didn't receive data");
         let (_, packet) = decoder::decode_udp(&buf[..len]).expect("failed to decode");
-        match packet {
-            OscPacket::Message(msg) => {
-                println!("{}: {}", msg.addr, msg.args[0])
-            }
-            _ => (),
+        if let OscPacket::Message(msg) = packet {
+            println!("{}: {}", msg.addr, msg.args[0])
         };
     }
 }
