@@ -113,7 +113,14 @@ impl Sender {
         }
     }
 
+    fn is_running(&self) -> bool {
+        self.tx.is_some()
+    }
+
     pub fn init(&mut self, port: u16) -> io::Result<()> {
+        if self.is_running() {
+            return Ok(());
+        }
         let (tx, rx) = mpsc::sync_channel::<_>(16);
         self.tx = Some(tx);
 
