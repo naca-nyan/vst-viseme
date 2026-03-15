@@ -15,6 +15,7 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 egui_autocomplete = "10.2.0"
+loqa-voice-dsp = "0.5.0"
 # Remove the `assert_process_allocs` feature to allow allocations on the audio
 # thread in debug builds.
 nih_plug = { git = "https://github.com/polartape/nih-plug.git", features = ["assert_process_allocs", "standalone"], branch = "keyboard-fix" }
