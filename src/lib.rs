@@ -5,7 +5,7 @@ mod utils;
 
 use std::{
     collections::VecDeque,
-    sync::{Arc, RwLock},
+    sync::{atomic::Ordering, Arc, RwLock},
 };
 
 use nih_plug::prelude::*;
@@ -30,6 +30,8 @@ struct VstVisemeParams {
     pub gain: FloatParam,
     #[persist = "audio-address"]
     pub audio_addr: RwLock<String>,
+    #[persist = "pitch-address"]
+    pub pitch_addr: RwLock<String>,
     #[persist = "midi-addresses"]
     pub midi_addrs: RwLock<Vec<ParamEntry>>,
     #[persist = "cc-addresses"]
@@ -63,7 +65,8 @@ impl Default for VstVisemeParams {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
-            audio_addr: RwLock::new("Viseme1".into()),
+            audio_addr: RwLock::new("Volume1".into()),
+            pitch_addr: RwLock::new("Pitch1".into()),
             midi_addrs: RwLock::new(vec![(60, 0, "Item1".into())]),
             cc_addrs: RwLock::new(vec![(1, 2, "Float1".into())]),
         }
@@ -71,6 +74,7 @@ impl Default for VstVisemeParams {
 }
 
 pub enum Task {
+    UpdateSampleRate(f32),
     ProcessSamples([f32; BUFFER_SIZE]),
     NoteEvent(NoteEvent<()>),
 }
@@ -108,12 +112,31 @@ impl Plugin for VstViseme {
             .init(PORT)
             .unwrap_or_else(|e| nih_error!("Failed to init sender: {}", e));
         let params = self.params.clone();
+        let sample_rate = Arc::new(AtomicF32::new(48_000.0));
         Box::new(move |task| match task {
+            Task::UpdateSampleRate(value) => sample_rate.store(value, Ordering::Relaxed),
             Task::ProcessSamples(samples) => {
                 let rms = audio::rms(&samples);
-                let addr = params.audio_addr.read().unwrap();
-                if !addr.is_empty() {
-                    sender.send(osc::new_float_message(&addr, rms));
+                {
+                    let addr = params.audio_addr.read().unwrap();
+                    if !addr.is_empty() {
+                        sender.send(osc::new_float_message(&addr, rms));
+                    }
+                }
+                const GATE_THRESHOLD: f32 = 0.01;
+                if rms > GATE_THRESHOLD {
+                    let pitch = audio::pitch(&samples, sample_rate.load(Ordering::Relaxed));
+                    if let Some((frequency, confidence)) = pitch {
+                        const CONFIDENCE_MIN: f32 = 0.5;
+                        if confidence > CONFIDENCE_MIN {
+                            let addr = params.pitch_addr.read().unwrap();
+                            let normalized =
+                                (frequency - audio::MIN_FREQ) / (audio::MAX_FREQ - audio::MIN_FREQ);
+                            if !addr.is_empty() {
+                                sender.send(osc::new_float_message(&addr, normalized));
+                            }
+                        }
+                    }
                 }
             }
             Task::NoteEvent(event) => match event {
@@ -158,9 +181,10 @@ impl Plugin for VstViseme {
     fn initialize(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
-        _buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        buffer_config: &BufferConfig,
+        context: &mut impl InitContext<Self>,
     ) -> bool {
+        context.execute(Task::UpdateSampleRate(buffer_config.sample_rate));
         true
     }
 

@@ -232,9 +232,16 @@ fn contents(
         ui.add(widgets::ParamSlider::for_param(&params.gain, setter));
         ui.end_row();
 
-        ui.label("Address");
+        ui.label("Volume");
         {
             let mut address = params.audio_addr.write().unwrap();
+            ui.add(ParamNameTextEdit::new(&mut address, &receiver_state, &2));
+        }
+        ui.end_row();
+
+        ui.label("Pitch");
+        {
+            let mut address = params.pitch_addr.write().unwrap();
             ui.add(ParamNameTextEdit::new(&mut address, &receiver_state, &2));
         }
         ui.end_row();
