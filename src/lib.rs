@@ -3,19 +3,20 @@ mod editor;
 mod osc;
 mod utils;
 
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, RwLock},
+};
 
 use nih_plug::prelude::*;
 
-use crate::{
-    audio::AudioState,
-    editor::{EditorState, ParamEntry},
-};
+use crate::editor::{EditorState, ParamEntry};
+
+const BUFFER_SIZE: usize = 1024;
 
 pub struct VstViseme {
     params: Arc<VstVisemeParams>,
-    sender: osc::Sender,
-    audio_state: AudioState,
+    buffer: VecDeque<f32>,
 }
 
 #[derive(Params)]
@@ -39,8 +40,7 @@ impl Default for VstViseme {
     fn default() -> Self {
         Self {
             params: Arc::new(VstVisemeParams::default()),
-            sender: osc::Sender::new(),
-            audio_state: AudioState::default(),
+            buffer: VecDeque::with_capacity(BUFFER_SIZE),
         }
     }
 }
@@ -70,6 +70,11 @@ impl Default for VstVisemeParams {
     }
 }
 
+pub enum Task {
+    ProcessSamples([f32; BUFFER_SIZE]),
+    NoteEvent(NoteEvent<()>),
+}
+
 impl Plugin for VstViseme {
     const NAME: &'static str = "Vst Viseme";
     const VENDOR: &'static str = "Naca Nyan";
@@ -94,7 +99,52 @@ impl Plugin for VstViseme {
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     type SysExMessage = ();
-    type BackgroundTask = ();
+    type BackgroundTask = Task;
+
+    fn task_executor(&mut self) -> TaskExecutor<Self> {
+        const PORT: u16 = 9000;
+        let mut sender = osc::Sender::new();
+        sender
+            .init(PORT)
+            .unwrap_or_else(|e| nih_error!("Failed to init sender: {}", e));
+        let params = self.params.clone();
+        Box::new(move |task| match task {
+            Task::ProcessSamples(samples) => {
+                let rms = audio::rms(&samples);
+                let addr = params.audio_addr.read().unwrap();
+                if !addr.is_empty() {
+                    sender.send(osc::new_float_message(&addr, rms));
+                }
+            }
+            Task::NoteEvent(event) => match event {
+                NoteEvent::NoteOn { note, velocity, .. } => {
+                    let midi_addrs = params.midi_addrs.read().unwrap();
+                    for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
+                        if !name.is_empty() {
+                            sender.send(osc::new_note_on_message(name, param_type, velocity));
+                        }
+                    }
+                }
+                NoteEvent::NoteOff { note, .. } => {
+                    let midi_addrs = params.midi_addrs.read().unwrap();
+                    for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
+                        if !name.is_empty() {
+                            sender.send(osc::new_note_off_message(name, param_type));
+                        }
+                    }
+                }
+                NoteEvent::MidiCC { cc, value, .. } => {
+                    let cc_addrs = params.cc_addrs.read().unwrap();
+                    for (_, param_type, name) in cc_addrs.iter().filter(|v| v.0 == cc) {
+                        if !name.is_empty() {
+                            sender.send(osc::new_cc_message(name, param_type, value));
+                        }
+                    }
+                }
+                _ => (),
+            },
+        })
+    }
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
@@ -111,11 +161,7 @@ impl Plugin for VstViseme {
         _buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        const PORT: u16 = 9000;
-        self.sender
-            .init(PORT)
-            .inspect_err(|e| nih_error!("Failed to init sender: {}", e))
-            .is_ok()
+        true
     }
 
     fn reset(&mut self) {}
@@ -131,47 +177,28 @@ impl Plugin for VstViseme {
         }
 
         // process audio
-        let gain = self.params.gain.smoothed.next();
-        self.audio_state.process(buffer, gain);
-        if let Some(rms) = self.audio_state.try_get_rms() {
-            let addr = self.params.audio_addr.read().unwrap();
-            if !addr.is_empty() {
-                self.sender.send(osc::new_float_message(&addr, rms));
+        for channel_samples in buffer.iter_samples() {
+            // Smoothing is optionally built into the parameters themselves
+            let gain = self.params.gain.smoothed.next();
+            let channels = channel_samples.len();
+            let mut sum = 0.0;
+            for sample in channel_samples {
+                sum += *sample * gain;
             }
-            self.audio_state.reset();
+            let mean = sum / channels as f32;
+            self.buffer.push_back(mean);
+        }
+        if self.buffer.len() >= BUFFER_SIZE {
+            let mut samples = [0.0; BUFFER_SIZE];
+            for (dst, src) in samples.iter_mut().zip(self.buffer.drain(..BUFFER_SIZE)) {
+                *dst = src;
+            }
+            context.execute_background(Task::ProcessSamples(samples));
         }
 
         // process midi
-        let midi_addrs = self.params.midi_addrs.read().unwrap();
-        let cc_addrs = self.params.cc_addrs.read().unwrap();
         while let Some(event) = context.next_event() {
-            match event {
-                NoteEvent::NoteOn { note, velocity, .. } => {
-                    for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
-                        if !name.is_empty() {
-                            self.sender
-                                .send(osc::new_note_on_message(name, param_type, velocity));
-                        }
-                    }
-                }
-                NoteEvent::NoteOff { note, .. } => {
-                    for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
-                        if !name.is_empty() {
-                            self.sender
-                                .send(osc::new_note_off_message(name, param_type));
-                        }
-                    }
-                }
-                NoteEvent::MidiCC { cc, value, .. } => {
-                    for (_, param_type, name) in cc_addrs.iter().filter(|v| v.0 == cc) {
-                        if !name.is_empty() {
-                            self.sender
-                                .send(osc::new_cc_message(name, param_type, value));
-                        }
-                    }
-                }
-                _ => (),
-            }
+            context.execute_background(Task::NoteEvent(event));
         }
 
         ProcessStatus::Normal

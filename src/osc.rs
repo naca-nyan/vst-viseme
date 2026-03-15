@@ -102,15 +102,11 @@ fn is_nearly_eq(a: &OscMessage, b: &OscMessage) -> bool {
 
 pub struct Sender {
     tx: Option<mpsc::SyncSender<OscMessage>>,
-    state: HashMap<String, OscMessage>,
 }
 
 impl Sender {
     pub fn new() -> Self {
-        Self {
-            tx: None,
-            state: HashMap::new(),
-        }
+        Self { tx: None }
     }
 
     fn is_running(&self) -> bool {
@@ -126,12 +122,20 @@ impl Sender {
 
         let sock = UdpSocket::bind("127.0.0.1:0")?;
         sock.connect(("127.0.0.1", port))?;
-        let sender_func = move |msg| {
-            let packet = OscPacket::Message(msg);
+
+        let mut state = HashMap::new();
+        let mut sender_func = move |msg: OscMessage| {
+            if let Some(prev) = state.get(&msg.addr) {
+                if is_nearly_eq(prev, &msg) {
+                    return None;
+                }
+            }
+            let packet = OscPacket::Message(msg.clone());
             let buf = encoder::encode(&packet).ok()?;
             sock.send(&buf)
                 .inspect_err(|e| nih_error!("failed to send: {e}"))
                 .ok()?;
+            state.insert(msg.addr.clone(), msg);
             Some(())
         };
         thread::spawn(move || {
@@ -142,16 +146,8 @@ impl Sender {
         Ok(())
     }
 
-    pub fn send(&mut self, value: OscMessage) {
-        if let Some(prev) = self.state.get(&value.addr) {
-            if is_nearly_eq(prev, &value) {
-                return;
-            }
-        }
-        if let Some(tx) = &self.tx {
-            let _ = tx.try_send(value.clone());
-        }
-        self.state.insert(value.addr.clone(), value);
+    pub fn send(&self, msg: OscMessage) -> bool {
+        self.tx.as_ref().is_some_and(|tx| tx.try_send(msg).is_ok())
     }
 }
 
