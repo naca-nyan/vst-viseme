@@ -2,6 +2,7 @@ mod audio;
 mod editor;
 mod osc;
 mod utils;
+mod widget;
 
 use std::{
     collections::VecDeque,
@@ -10,7 +11,7 @@ use std::{
 
 use nih_plug::prelude::*;
 
-use crate::editor::{EditorState, ParamEntry};
+use crate::{editor::EditorState, widget::param_map::ParamEntry};
 
 const BUFFER_SIZE: usize = 1024;
 
