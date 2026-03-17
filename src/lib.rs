@@ -17,6 +17,7 @@ const BUFFER_SIZE: usize = 1024;
 
 #[derive(Default)]
 pub struct Meters {
+    rms: AtomicF32,
     pitch: AtomicF32,
 }
 
@@ -35,8 +36,13 @@ struct VstVisemeParams {
     pub bypass: BoolParam,
     #[id = "gain"]
     pub gain: FloatParam,
-    #[persist = "audio-address"]
-    pub audio_addr: RwLock<String>,
+
+    #[persist = "volume-address"]
+    pub volume_addr: RwLock<String>,
+    #[id = "volume-min"]
+    pub volume_min: FloatParam,
+    #[id = "volume-max"]
+    pub volume_max: FloatParam,
 
     #[persist = "pitch-address"]
     pub pitch_addr: RwLock<String>,
@@ -63,6 +69,7 @@ impl Default for VstViseme {
 
 impl Default for VstVisemeParams {
     fn default() -> Self {
+        let volume_range = FloatRange::Linear { min: 0.0, max: 1.0 };
         let pitch_range = FloatRange::Linear {
             min: audio::MIN_FREQ,
             max: audio::MAX_FREQ,
@@ -83,8 +90,10 @@ impl Default for VstVisemeParams {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
-            audio_addr: RwLock::new("Volume1".into()),
-            pitch_addr: RwLock::new("Pitch1".into()),
+            volume_addr: RwLock::new("Volume".into()),
+            volume_min: FloatParam::new("Volume min", 0.0, volume_range),
+            volume_max: FloatParam::new("Volume max", 1.0, volume_range),
+            pitch_addr: RwLock::new("Pitch".into()),
             pitch_min: FloatParam::new("Pitch min", audio::MIN_FREQ, pitch_range),
             pitch_max: FloatParam::new("Pitch max", audio::MAX_FREQ, pitch_range),
             midi_addrs: RwLock::new(vec![(60, 0, "Item1".into())]),
@@ -138,10 +147,14 @@ impl Plugin for VstViseme {
             Task::UpdateSampleRate(value) => sample_rate.store(value, Ordering::Relaxed),
             Task::ProcessSamples(samples) => {
                 let rms = audio::rms(&samples);
+                meters.rms.store(rms, Ordering::Relaxed);
                 {
-                    let addr = params.audio_addr.read().unwrap();
+                    let addr = params.volume_addr.read().unwrap();
                     if !addr.is_empty() {
-                        sender.send(osc::new_float_message(&addr, rms));
+                        let min = params.volume_min.value();
+                        let max = params.volume_max.value();
+                        let normalized = (rms - min) / (max - min);
+                        sender.send(osc::new_float_message(&addr, normalized));
                     }
                 }
                 const GATE_THRESHOLD: f32 = 0.01;
@@ -152,10 +165,10 @@ impl Plugin for VstViseme {
                         if confidence > CONFIDENCE_MIN {
                             meters.pitch.store(frequency, Ordering::Relaxed);
                             let addr = params.pitch_addr.read().unwrap();
-                            let min = params.pitch_min.value();
-                            let max = params.pitch_max.value();
-                            let normalized = (frequency - min) / (max - min);
                             if !addr.is_empty() {
+                                let min = params.pitch_min.value();
+                                let max = params.pitch_max.value();
+                                let normalized = (frequency - min) / (max - min);
                                 sender.send(osc::new_float_message(&addr, normalized));
                             }
                         }

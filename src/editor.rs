@@ -78,8 +78,16 @@ fn contents(
         ui.end_row();
 
         ui.label("Volume");
+        ui.add(Meter::new(
+            meters.rms.load(Ordering::Relaxed),
+            &params.volume_min,
+            &params.volume_max,
+            setter,
+        ));
+        ui.end_row();
+        ui.label("");
         {
-            let mut address = params.audio_addr.write().unwrap();
+            let mut address = params.volume_addr.write().unwrap();
             ui.add(ParamNameTextEdit::new(&mut address, &receiver_state, &2));
         }
         ui.end_row();
