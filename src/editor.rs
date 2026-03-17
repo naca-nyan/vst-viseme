@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use nih_plug::prelude::*;
@@ -7,8 +8,8 @@ use nih_plug_egui::{create_egui_editor, resizable_window::ResizableWindow, widge
 use crate::{
     osc,
     utils::note_friendly_name,
-    widget::{param_map::ParamMap, param_name_text_edit::ParamNameTextEdit},
-    VstViseme, VstVisemeParams,
+    widget::{meter::Meter, param_map::ParamMap, param_name_text_edit::ParamNameTextEdit},
+    Meters, VstViseme, VstVisemeParams,
 };
 
 pub type EditorState = EguiState;
@@ -22,6 +23,7 @@ struct UserState {
 
 pub fn create_editor(
     params: Arc<VstVisemeParams>,
+    meters: Arc<Meters>,
     _async_executor: AsyncExecutor<VstViseme>,
 ) -> Option<Box<dyn Editor>> {
     let receiver = osc::Receiver::new();
@@ -34,9 +36,9 @@ pub fn create_editor(
             ResizableWindow::new("res-wind")
                 .min_size(Vec2::new(300.0, 280.0))
                 .show(ctx, params.editor_state.clone().as_ref(), |ui| {
-                    Frame::new()
-                        .inner_margin(6.0)
-                        .show(ui, |ui| contents(ui, params.clone(), setter, state));
+                    Frame::new().inner_margin(6.0).show(ui, |ui| {
+                        contents(ui, params.clone(), meters.clone(), setter, state)
+                    });
                 });
         },
     )
@@ -63,6 +65,7 @@ fn build(ctx: &Context, _: &mut UserState) {
 fn contents(
     ui: &mut Ui,
     params: Arc<VstVisemeParams>,
+    meters: Arc<Meters>,
     setter: &ParamSetter<'_>,
     state: &mut UserState,
 ) {
@@ -82,6 +85,14 @@ fn contents(
         ui.end_row();
 
         ui.label("Pitch");
+        ui.add(Meter::new(
+            meters.pitch.load(Ordering::Relaxed),
+            &params.pitch_min,
+            &params.pitch_max,
+            setter,
+        ));
+        ui.end_row();
+        ui.label("");
         {
             let mut address = params.pitch_addr.write().unwrap();
             ui.add(ParamNameTextEdit::new(&mut address, &receiver_state, &2));

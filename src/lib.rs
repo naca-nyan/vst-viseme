@@ -15,8 +15,14 @@ use crate::{editor::EditorState, widget::param_map::ParamEntry};
 
 const BUFFER_SIZE: usize = 1024;
 
+#[derive(Default)]
+pub struct Meters {
+    pitch: AtomicF32,
+}
+
 pub struct VstViseme {
     params: Arc<VstVisemeParams>,
+    meters: Arc<Meters>,
     buffer: VecDeque<f32>,
 }
 
@@ -31,8 +37,14 @@ struct VstVisemeParams {
     pub gain: FloatParam,
     #[persist = "audio-address"]
     pub audio_addr: RwLock<String>,
+
     #[persist = "pitch-address"]
     pub pitch_addr: RwLock<String>,
+    #[id = "pitch-min"]
+    pub pitch_min: FloatParam,
+    #[id = "pitch-max"]
+    pub pitch_max: FloatParam,
+
     #[persist = "midi-addresses"]
     pub midi_addrs: RwLock<Vec<ParamEntry>>,
     #[persist = "cc-addresses"]
@@ -43,6 +55,7 @@ impl Default for VstViseme {
     fn default() -> Self {
         Self {
             params: Arc::new(VstVisemeParams::default()),
+            meters: Arc::new(Meters::default()),
             buffer: VecDeque::with_capacity(BUFFER_SIZE),
         }
     }
@@ -50,6 +63,10 @@ impl Default for VstViseme {
 
 impl Default for VstVisemeParams {
     fn default() -> Self {
+        let pitch_range = FloatRange::Linear {
+            min: audio::MIN_FREQ,
+            max: audio::MAX_FREQ,
+        };
         Self {
             editor_state: editor::new_state(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
@@ -68,6 +85,8 @@ impl Default for VstVisemeParams {
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
             audio_addr: RwLock::new("Volume1".into()),
             pitch_addr: RwLock::new("Pitch1".into()),
+            pitch_min: FloatParam::new("Pitch min", audio::MIN_FREQ, pitch_range),
+            pitch_max: FloatParam::new("Pitch max", audio::MAX_FREQ, pitch_range),
             midi_addrs: RwLock::new(vec![(60, 0, "Item1".into())]),
             cc_addrs: RwLock::new(vec![(1, 2, "Float1".into())]),
         }
@@ -113,6 +132,7 @@ impl Plugin for VstViseme {
             .init(PORT)
             .unwrap_or_else(|e| nih_error!("Failed to init sender: {}", e));
         let params = self.params.clone();
+        let meters = self.meters.clone();
         let sample_rate = Arc::new(AtomicF32::new(48_000.0));
         Box::new(move |task| match task {
             Task::UpdateSampleRate(value) => sample_rate.store(value, Ordering::Relaxed),
@@ -130,9 +150,11 @@ impl Plugin for VstViseme {
                     if let Some((frequency, confidence)) = pitch {
                         const CONFIDENCE_MIN: f32 = 0.5;
                         if confidence > CONFIDENCE_MIN {
+                            meters.pitch.store(frequency, Ordering::Relaxed);
                             let addr = params.pitch_addr.read().unwrap();
-                            let normalized =
-                                (frequency - audio::MIN_FREQ) / (audio::MAX_FREQ - audio::MIN_FREQ);
+                            let min = params.pitch_min.value();
+                            let max = params.pitch_max.value();
+                            let normalized = (frequency - min) / (max - min);
                             if !addr.is_empty() {
                                 sender.send(osc::new_float_message(&addr, normalized));
                             }
@@ -176,7 +198,8 @@ impl Plugin for VstViseme {
 
     fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
-        editor::create_editor(params, async_executor)
+        let meters = self.meters.clone();
+        editor::create_editor(params, meters, async_executor)
     }
 
     fn initialize(
