@@ -157,21 +157,20 @@ impl Plugin for VstViseme {
                         sender.send(osc::new_float_message(&addr, normalized));
                     }
                 }
+                let sample_rate = sample_rate.load(Ordering::Relaxed);
                 const GATE_THRESHOLD: f32 = 0.01;
-                if rms > GATE_THRESHOLD {
-                    let pitch = audio::pitch(&samples, sample_rate.load(Ordering::Relaxed));
-                    if let Some((frequency, confidence)) = pitch {
-                        const CONFIDENCE_MIN: f32 = 0.5;
-                        if confidence > CONFIDENCE_MIN {
-                            meters.pitch.store(frequency, Ordering::Relaxed);
-                            let addr = params.pitch_addr.read().unwrap();
-                            if !addr.is_empty() {
-                                let min = params.pitch_min.value();
-                                let max = params.pitch_max.value();
-                                let normalized = (frequency - min) / (max - min);
-                                sender.send(osc::new_float_message(&addr, normalized));
-                            }
-                        }
+                let pitch = (rms > GATE_THRESHOLD)
+                    .then(|| audio::pitch(&samples, sample_rate))
+                    .flatten()
+                    .unwrap_or(0.0);
+                meters.pitch.store(pitch, Ordering::Relaxed);
+                {
+                    let addr = params.pitch_addr.read().unwrap();
+                    if !addr.is_empty() {
+                        let min = params.pitch_min.value();
+                        let max = params.pitch_max.value();
+                        let normalized = (pitch - min) / (max - min);
+                        sender.send(osc::new_float_message(&addr, normalized));
                     }
                 }
             }
