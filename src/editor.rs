@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use nih_plug::prelude::*;
 use nih_plug_egui::egui::*;
 use nih_plug_egui::{create_egui_editor, resizable_window::ResizableWindow, widgets, EguiState};
+use serde_json::Value;
 
 use crate::{
     osc,
@@ -28,9 +30,12 @@ const TABS: [(Tab, &str); 2] = {
     [(Main, "Main"), (Config, "Config")]
 };
 
+type DialogResult = Result<String, String>;
+
 struct UserState {
     receiver: osc::Receiver,
     tab: Tab,
+    dialog_result: Arc<Mutex<DialogResult>>, // この Mutex が lock されているときは dialog が開いている
 }
 
 pub fn create_editor(
@@ -43,7 +48,11 @@ pub fn create_editor(
     let egui_state = params.editor_state.clone();
     create_egui_editor(
         egui_state,
-        UserState { receiver, tab },
+        UserState {
+            receiver,
+            tab,
+            dialog_result: Arc::new(Mutex::new(Ok(String::new()))),
+        },
         build,
         move |ctx, setter, state| {
             ResizableWindow::new("res-wind")
@@ -169,6 +178,75 @@ fn show_main(
     }
 }
 
-fn show_config(ui: &mut Ui, _params: Arc<VstVisemeParams>, _state: &mut UserState) {
+fn show_config(ui: &mut Ui, params: Arc<VstVisemeParams>, state: &mut UserState) {
     ui.heading("Config");
+    let dialog_lock = state.dialog_result.try_lock();
+    let dialog_opened = dialog_lock.is_err();
+    ui.add_enabled_ui(!dialog_opened, |ui| {
+        if ui.button("Import parameters").clicked() {
+            let params = params.clone();
+            spawn_dialog(&state, move |dialog| {
+                let path = dialog.add_filter("json", &["json"]).pick_file();
+                if let Some(path) = path {
+                    let data =
+                        std::fs::read(path).map_err(|e| format!("Failed to read file: {e}"))?;
+                    let json_value: BTreeMap<String, Value> =
+                        serde_json::from_slice(&data).map_err(|e| format!("Invalid json: {e}"))?;
+                    let serialized: BTreeMap<String, String> = json_value
+                        .into_iter()
+                        .map(|(k, v)| (k, v.to_string()))
+                        .collect();
+                    params.deserialize_fields(&serialized);
+                    Ok("Import succeeded!".to_owned())
+                } else {
+                    Ok("".to_owned())
+                }
+            });
+        }
+        if ui.button("Export parameters").clicked() {
+            let params = params.clone();
+            spawn_dialog(&state, move |dialog| {
+                let value_map: BTreeMap<String, Value> = params
+                    .serialize_fields()
+                    .into_iter()
+                    .filter_map(|(k, v)| {
+                        if k == "editor-state" {
+                            return None;
+                        }
+                        let value = serde_json::from_str::<Value>(&v).ok()?;
+                        Some((k, value))
+                    })
+                    .collect();
+                let json = serde_json::to_string_pretty(&value_map)
+                    .map_err(|e| format!("Failed to format json: {e}"))?;
+                let path = dialog.set_file_name("vst-viseme-params.json").save_file();
+                if let Some(path) = path {
+                    std::fs::write(path, &json)
+                        .map_err(|e| format!("Failed to write file: {e}"))?;
+                    Ok("Export succeeded!".to_owned())
+                } else {
+                    Ok("".to_owned())
+                }
+            });
+        }
+        if let Ok(result) = dialog_lock {
+            match result.as_ref() {
+                Ok(msg) => ui.label(msg),
+                Err(error) => ui.colored_label(Color32::RED, error),
+            };
+        }
+    });
+}
+
+fn spawn_dialog(
+    state: &UserState,
+    task: impl FnOnce(rfd::FileDialog) -> DialogResult + Send + 'static,
+) {
+    let dialog_result = state.dialog_result.clone();
+    std::thread::spawn(move || {
+        // Dialog が開いている間 (task が終わるまで) dialog_result を lock し続ける
+        let mut error = dialog_result.lock().unwrap_or_else(|e| e.into_inner());
+        let dialog = rfd::FileDialog::new();
+        *error = task(dialog);
+    });
 }
