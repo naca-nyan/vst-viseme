@@ -17,8 +17,20 @@ pub fn new_state() -> Arc<EditorState> {
     EguiState::from_size(350, 500)
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Tab {
+    Main,
+    Config,
+}
+
+const TABS: [(Tab, &str); 2] = {
+    use Tab::*;
+    [(Main, "Main"), (Config, "Config")]
+};
+
 struct UserState {
     receiver: osc::Receiver,
+    tab: Tab,
 }
 
 pub fn create_editor(
@@ -27,17 +39,26 @@ pub fn create_editor(
     _async_executor: AsyncExecutor<VstViseme>,
 ) -> Option<Box<dyn Editor>> {
     let receiver = osc::Receiver::new();
+    let tab = Tab::Main;
     let egui_state = params.editor_state.clone();
     create_egui_editor(
         egui_state,
-        UserState { receiver },
+        UserState { receiver, tab },
         build,
         move |ctx, setter, state| {
             ResizableWindow::new("res-wind")
                 .min_size(Vec2::new(300.0, 280.0))
-                .show(ctx, params.editor_state.clone().as_ref(), |ui| {
-                    Frame::new().inner_margin(6.0).show(ui, |ui| {
-                        contents(ui, params.clone(), meters.clone(), setter, state)
+                .show(ctx, params.editor_state.as_ref(), |_ui| {
+                    TopBottomPanel::top("top-panel").show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            for &(tab, label) in &TABS {
+                                ui.selectable_value(&mut state.tab, tab, label);
+                            }
+                        });
+                    });
+                    CentralPanel::default().show(ctx, |ui| match state.tab {
+                        Tab::Main => show_main(ui, params.clone(), meters.clone(), setter, state),
+                        Tab::Config => show_config(ui, params.clone(), state),
                     });
                 });
         },
@@ -62,7 +83,7 @@ fn build(ctx: &Context, _: &mut UserState) {
     ctx.set_fonts(font_definitions);
 }
 
-fn contents(
+fn show_main(
     ui: &mut Ui,
     params: Arc<VstVisemeParams>,
     meters: Arc<Meters>,
@@ -146,4 +167,8 @@ fn contents(
                 .unwrap_or_else(|e| nih_error!("Failed to init receiver: {}", e));
         }
     }
+}
+
+fn show_config(ui: &mut Ui, _params: Arc<VstVisemeParams>, _state: &mut UserState) {
+    ui.heading("Config");
 }
