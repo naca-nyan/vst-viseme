@@ -22,12 +22,13 @@ pub fn new_state() -> Arc<EditorState> {
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
     Main,
+    Monitor,
     Config,
 }
 
-const TABS: [(Tab, &str); 2] = {
+const TABS: [(Tab, &str); 3] = {
     use Tab::*;
-    [(Main, "Main"), (Config, "Config")]
+    [(Main, "Main"), (Monitor, "Monitor"), (Config, "Config")]
 };
 
 type DialogResult = Result<String, String>;
@@ -67,6 +68,7 @@ pub fn create_editor(
                     });
                     CentralPanel::default().show(ctx, |ui| match state.tab {
                         Tab::Main => show_main(ui, params.clone(), meters.clone(), setter, state),
+                        Tab::Monitor => show_monitor(ui, state),
                         Tab::Config => show_config(ui, params.clone(), state),
                     });
                 });
@@ -154,28 +156,39 @@ fn show_main(
         .selectable_types(vec![1, 2])
         .new_entry((1, 2, "Float1".into()));
     ui.add(cc_param_map);
+}
 
-    ui.add_space(10.0);
+fn show_monitor(ui: &mut Ui, state: &mut UserState) {
+    let receiver = &mut state.receiver;
     ui.heading("Monitor");
+    ui.label("VRChat からパラメータの変化を受信し、パラメータ名の補完候補に追加します。");
+    let rec_mark = RichText::color(RichText::new("●"), Color32::RED);
     if receiver.is_running() {
-        if ui.button("Stop monitor").clicked() {
-            receiver.stop()
+        if ui.selectable_label(true, rec_mark).clicked() {
+            receiver.stop();
         }
-        Grid::new("state grid").num_columns(2).show(ui, |ui| {
-            for (k, v) in receiver_state.iter() {
-                ui.label(k);
-                ui.label(v.to_string());
-                ui.end_row();
-            }
-        });
     } else {
-        if ui.button("Start monitor").clicked() {
+        if ui.button(rec_mark).clicked() {
             const PORT: u16 = 9001;
             receiver
                 .init(PORT)
                 .unwrap_or_else(|e| nih_error!("Failed to init receiver: {}", e));
         }
     }
+    let receiver_state = receiver.state().read().unwrap().clone();
+    if receiver.is_running() && receiver_state.is_empty() {
+        ui.label("何も受信されていません");
+    }
+    Grid::new("state grid").striped(true).show(ui, |ui| {
+        for (k, v) in receiver_state.iter() {
+            ui.label(k);
+            ui.label(type_as_str(v));
+            if receiver.is_running() {
+                ui.label(value_str(v));
+            }
+            ui.end_row();
+        }
+    });
 }
 
 fn show_config(ui: &mut Ui, params: Arc<VstVisemeParams>, state: &mut UserState) {
@@ -249,4 +262,26 @@ fn spawn_dialog(
         let dialog = rfd::FileDialog::new();
         *error = task(dialog);
     });
+}
+
+fn type_as_str(t: &rosc::OscType) -> &'static str {
+    use rosc::OscType::*;
+    match t {
+        Int(_) => "Int",
+        Float(_) => "Float",
+        String(_) => "String",
+        Bool(_) => "Bool",
+        _ => "Unknown",
+    }
+}
+
+fn value_str(t: &rosc::OscType) -> String {
+    use rosc::OscType::*;
+    match t {
+        Int(v) => v.to_string(),
+        Float(v) => v.to_string(),
+        String(v) => v.to_string(),
+        Bool(v) => v.to_string(),
+        _ => "".to_string(),
+    }
 }
