@@ -232,7 +232,10 @@ fn show_config(ui: &mut Ui, params: Arc<VstVisemeParams>, state: &mut UserState)
                     .collect();
                 let json = serde_json::to_string_pretty(&value_map)
                     .map_err(|e| format!("Failed to format json: {e}"))?;
-                let path = dialog.set_file_name("vst-viseme-params.json").save_file();
+                let path = dialog
+                    .add_filter("json", &["json"])
+                    .set_file_name("vst-viseme-params.json")
+                    .save_file();
                 if let Some(path) = path {
                     std::fs::write(path, &json)
                         .map_err(|e| format!("Failed to write file: {e}"))?;
