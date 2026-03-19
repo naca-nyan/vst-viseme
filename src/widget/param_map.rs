@@ -113,15 +113,18 @@ impl Widget for ParamMap<'_> {
             entries.remove(i);
         }
         ui.horizontal(|ui| {
+            let meter = self.meter.load(Ordering::Relaxed);
             let response = ui.button("＋");
             if entries.len() < 128 && response.clicked() {
                 let mut new_entry = self.new_entry;
                 if let Some(max) = entries.iter().map(|v| v.0).max() {
                     new_entry.0 = max + 1;
                 }
+                if meter != 0 {
+                    new_entry.0 = meter;
+                }
                 entries.push(new_entry);
             };
-            let meter = self.meter.load(Ordering::Relaxed);
             if meter != 0 {
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                     ui.label(formatter(&meter));
