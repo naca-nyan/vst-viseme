@@ -16,7 +16,7 @@ use crate::{
 
 pub type EditorState = EguiState;
 pub fn new_state() -> Arc<EditorState> {
-    EguiState::from_size(350, 500)
+    EguiState::from_size(350, 400)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -142,7 +142,7 @@ fn show_main(
     ui.add_space(10.0);
     ui.heading("Midi");
     let mut midi_addrs = params.midi_addrs.write().unwrap();
-    let midi_param_map = ParamMap::new("Midi", &mut midi_addrs, &receiver_state)
+    let midi_param_map = ParamMap::new("Midi", &mut midi_addrs, &receiver_state, &meters.midi)
         .reverse_trigger(true)
         .trigger_formatter(note_friendly_name)
         .new_entry((60, 0, "Item1".into()));
@@ -151,7 +151,7 @@ fn show_main(
     ui.add_space(10.0);
     ui.heading("CC");
     let mut cc_addrs = params.cc_addrs.write().unwrap();
-    let cc_param_map = ParamMap::new("CC", &mut cc_addrs, &receiver_state)
+    let cc_param_map = ParamMap::new("CC", &mut cc_addrs, &receiver_state, &meters.cc)
         .trigger_formatter(|cc| format!("CC {cc}"))
         .selectable_types(vec![1, 2])
         .new_entry((1, 2, "Float1".into()));

@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU8, Ordering},
+};
 
 use nih_plug_egui::egui::{Align, ComboBox, Grid, Layout, Response, Ui, Widget};
 use rosc::OscType;
@@ -14,6 +17,7 @@ pub struct ParamMap<'a> {
     id_salt: &'a str,
     entries: &'a mut Vec<ParamEntry>,
     autocomplete: &'a HashMap<String, OscType>,
+    meter: &'a AtomicU8,
     trigger_formatter: fn(&u8) -> String,
     selectable_types: Vec<ParamType>,
     reverse_trigger: bool,
@@ -25,11 +29,13 @@ impl<'a> ParamMap<'a> {
         id_salt: &'a str,
         entries: &'a mut Vec<ParamEntry>,
         autocomplete: &'a HashMap<String, OscType>,
+        meter: &'a AtomicU8,
     ) -> Self {
         Self {
             id_salt,
             entries,
             autocomplete,
+            meter,
             trigger_formatter: |v| v.to_string(),
             selectable_types: (0..PARAM_TYPES.len()).collect(),
             reverse_trigger: false,
@@ -86,7 +92,7 @@ impl Widget for ParamMap<'_> {
                     });
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                        if ui.button("x").clicked() {
+                        if ui.button("×").clicked() {
                             delete = Some(i);
                         }
                         ComboBox::from_id_salt(format!("{id_salt} param {i} combobox"))
@@ -106,14 +112,23 @@ impl Widget for ParamMap<'_> {
         if let Some(i) = delete {
             entries.remove(i);
         }
-        let response = ui.button("Add");
-        if entries.len() < 128 && response.clicked() {
-            let mut new_entry = self.new_entry;
-            if let Some(max) = entries.iter().map(|v| v.0).max() {
-                new_entry.0 = max + 1;
+        ui.horizontal(|ui| {
+            let response = ui.button("＋");
+            if entries.len() < 128 && response.clicked() {
+                let mut new_entry = self.new_entry;
+                if let Some(max) = entries.iter().map(|v| v.0).max() {
+                    new_entry.0 = max + 1;
+                }
+                entries.push(new_entry);
+            };
+            let meter = self.meter.load(Ordering::Relaxed);
+            if meter != 0 {
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    ui.label(formatter(&meter));
+                });
             }
-            entries.push(new_entry);
-        }
-        response
+            response
+        })
+        .inner
     }
 }

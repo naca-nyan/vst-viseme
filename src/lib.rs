@@ -6,7 +6,10 @@ mod widget;
 
 use std::{
     collections::VecDeque,
-    sync::{atomic::Ordering, Arc, RwLock},
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc, RwLock,
+    },
 };
 
 use nih_plug::prelude::*;
@@ -19,6 +22,8 @@ const BUFFER_SIZE: usize = 1024;
 pub struct Meters {
     rms: AtomicF32,
     pitch: AtomicF32,
+    midi: AtomicU8,
+    cc: AtomicU8,
 }
 
 pub struct VstViseme {
@@ -176,6 +181,7 @@ impl Plugin for VstViseme {
             }
             Task::NoteEvent(event) => match event {
                 NoteEvent::NoteOn { note, velocity, .. } => {
+                    meters.midi.store(note, Ordering::Relaxed);
                     let midi_addrs = params.midi_addrs.read().unwrap();
                     for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
                         if !name.is_empty() {
@@ -184,6 +190,7 @@ impl Plugin for VstViseme {
                     }
                 }
                 NoteEvent::NoteOff { note, .. } => {
+                    meters.midi.store(note, Ordering::Relaxed);
                     let midi_addrs = params.midi_addrs.read().unwrap();
                     for (_, param_type, name) in midi_addrs.iter().filter(|v| v.0 == note) {
                         if !name.is_empty() {
@@ -192,6 +199,7 @@ impl Plugin for VstViseme {
                     }
                 }
                 NoteEvent::MidiCC { cc, value, .. } => {
+                    meters.cc.store(cc, Ordering::Relaxed);
                     let cc_addrs = params.cc_addrs.read().unwrap();
                     for (_, param_type, name) in cc_addrs.iter().filter(|v| v.0 == cc) {
                         if !name.is_empty() {
