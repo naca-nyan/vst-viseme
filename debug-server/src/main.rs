@@ -1,4 +1,4 @@
-use rosc::{decoder, encoder, OscMessage, OscPacket, OscType};
+use rosc::{OscMessage, OscPacket, OscType, decoder, encoder};
 use std::{net::UdpSocket, thread, time::Duration};
 
 fn receive_loop() {

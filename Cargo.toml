@@ -8,7 +8,7 @@ homepage = "https://github.com/naca-nyan/vst-viseme"
 description = "Sends viseme info to OSC"
 
 [workspace]
-members = ["xtask"]
+members = ["debug-server","standalone","xtask"]
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -18,7 +18,7 @@ egui_autocomplete = "10.2.0"
 loqa-voice-dsp = "0.5.0"
 # Remove the `assert_process_allocs` feature to allow allocations on the audio
 # thread in debug builds.
-nih_plug = { git = "https://github.com/polartape/nih-plug.git", features = ["assert_process_allocs", "standalone"], branch = "keyboard-fix" }
+nih_plug = { git = "https://github.com/polartape/nih-plug.git", features = ["assert_process_allocs"], branch = "keyboard-fix" }
 nih_plug_egui = { git = "https://github.com/polartape/nih-plug.git", branch = "keyboard-fix" }
 rfd = "0.17.2"
 rosc = "0.11.4"
