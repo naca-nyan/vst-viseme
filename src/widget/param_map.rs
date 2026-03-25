@@ -127,7 +127,10 @@ impl Widget for ParamMap<'_> {
             };
             if meter != 0 {
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                    ui.label(formatter(&meter));
+                    let resp = ui.label(formatter(&meter));
+                    if resp.clicked() {
+                        self.meter.store(0, Ordering::Relaxed);
+                    }
                 });
             }
             response
