@@ -21,7 +21,7 @@ pub struct ParamMap<'a> {
     trigger_formatter: fn(&u8) -> String,
     selectable_types: Vec<ParamType>,
     reverse_trigger: bool,
-    new_entry: ParamEntry,
+    new_trigger: Trigger,
 }
 
 impl<'a> ParamMap<'a> {
@@ -39,7 +39,7 @@ impl<'a> ParamMap<'a> {
             trigger_formatter: |v| v.to_string(),
             selectable_types: (0..PARAM_TYPES.len()).collect(),
             reverse_trigger: false,
-            new_entry: (0, 0, "".into()),
+            new_trigger: 0,
         }
     }
     pub fn trigger_formatter(self, trigger_formatter: fn(&u8) -> String) -> Self {
@@ -60,8 +60,11 @@ impl<'a> ParamMap<'a> {
             ..self
         }
     }
-    pub fn new_entry(self, new_entry: ParamEntry) -> Self {
-        Self { new_entry, ..self }
+    pub fn new_trigger(self, new_trigger: Trigger) -> Self {
+        Self {
+            new_trigger,
+            ..self
+        }
     }
 }
 
@@ -116,14 +119,18 @@ impl Widget for ParamMap<'_> {
             let meter = self.meter.load(Ordering::Relaxed);
             let response = ui.button("＋");
             if entries.len() < 128 && response.clicked() {
-                let mut new_entry = self.new_entry;
-                if let Some(max) = entries.iter().map(|v| v.0).max() {
-                    new_entry.0 = max + 1;
-                }
-                if meter != 0 {
-                    new_entry.0 = meter;
-                }
-                entries.push(new_entry);
+                let new_trigger = if let Some(max) = entries.iter().map(|v| v.0).max() {
+                    max + 1
+                } else if meter != 0 {
+                    meter
+                } else {
+                    self.new_trigger
+                };
+                let new_type = entries
+                    .last()
+                    .map(|v| v.1)
+                    .unwrap_or(*self.selectable_types.first().unwrap());
+                entries.push((new_trigger, new_type, String::new()));
             };
             if meter != 0 {
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {

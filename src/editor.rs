@@ -145,7 +145,7 @@ fn show_main(
     let midi_param_map = ParamMap::new("Midi", &mut midi_addrs, &receiver_state, &meters.midi)
         .reverse_trigger(true)
         .trigger_formatter(note_friendly_name)
-        .new_entry((60, 0, "Item1".into()));
+        .new_trigger(60);
     ui.add(midi_param_map);
 
     ui.add_space(10.0);
@@ -154,7 +154,7 @@ fn show_main(
     let cc_param_map = ParamMap::new("CC", &mut cc_addrs, &receiver_state, &meters.cc)
         .trigger_formatter(|cc| format!("CC {cc}"))
         .selectable_types(vec![1, 2])
-        .new_entry((1, 2, "Float1".into()));
+        .new_trigger(1);
     ui.add(cc_param_map);
 }
 
